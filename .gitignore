@@ -1,0 +1,18 @@
+# Ignore virtual environments inside MIC
+MIC/.venv/
+MIC/venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Environment files
+.env
+
+# IDE
+.vscode/
+.idea/
+MIC/.venv/
+MIC/venv/
+__pycache__/
+.env
