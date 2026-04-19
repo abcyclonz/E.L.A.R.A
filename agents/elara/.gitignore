@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Environment & Data
+.env
+session_elara-*.json
+
+tables/
+logs/
+.claude/
+**/ .claude/

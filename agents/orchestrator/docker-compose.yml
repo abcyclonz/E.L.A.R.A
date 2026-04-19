@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: memory_db
+    environment:
+      POSTGRES_USER: memory_user
+      POSTGRES_PASSWORD: memory_pass
+      POSTGRES_DB: memory_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./memory-agent/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memory_user -d memory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  memory_agent:
+    build: ./memory-agent
+    container_name: memory_agent
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://memory_user:memory_pass@db:5432/memory_db
+      OLLAMA_URL: http://172.17.0.1:11434
+      OLLAMA_MODEL: mistral:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./memory-agent/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  orchestrator:
+    build: ./orchestrator
+    container_name: orchestrator
+    ports:
+      - "8001:8001"
+    environment:
+      MEMORY_AGENT_URL: http://memory_agent:8000
+      OLLAMA_URL: http://172.17.0.1:11434
+      OLLAMA_MODEL: mistral:latest
+    depends_on:
+      - memory_agent
+    volumes:
+      - ./orchestrator/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+volumes:
+  postgres_data:

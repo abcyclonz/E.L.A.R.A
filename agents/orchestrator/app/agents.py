@@ -1,0 +1,358 @@
+"""
+Orchestrator agents module.
+
+Capabilities:
+  - LLM-based router (STORE_MEMORY | RETRIEVE_MEMORY | STORE_AND_RETRIEVE | DIRECT_CHAT | USE_TOOL)
+  - Tool registry (stub — add real implementations later)
+  - Query rewriting before memory retrieval
+  - Conversation summarization every N turns
+  - Implicit style-feedback detection → emotion injection
+  - Elara session state management per speaker
+"""
+
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Optional
+import json
+import requests
+from app.config import settings
+
+
+# ── TOOL REGISTRY ──────────────────────────────────────────────────────────
+# Add new tools here. Each entry: "tool_id": "one-line description for the router"
+# The router sees these descriptions when deciding whether to call a tool.
+
+TOOL_REGISTRY: dict[str, str] = {
+    "calendar":      "Schedule events, add appointments, set reminders for a specific date/time",
+    "reminder":      "Set a one-time or recurring reminder (no specific calendar date needed)",
+    "web_search":    "Search the web for current information, news, facts, or weather",
+    "health_monitor":"Check the user's health metrics or vitals from connected sensors",
+}
+
+# Tool implementations — replace stubs with real code when ready
+def _run_tool(tool_name: str, user_text: str) -> str:
+    stubs = {
+        "calendar":      "Calendar tool not yet connected. Coming soon.",
+        "reminder":      "Reminder tool not yet connected. Coming soon.",
+        "web_search":    "Web search tool not yet connected. Coming soon.",
+        "health_monitor":"Health monitor tool not yet connected. Coming soon.",
+    }
+    return stubs.get(tool_name, f"Unknown tool: {tool_name}")
+
+
+# ── ROUTER ─────────────────────────────────────────────────────────────────
+
+_TOOLS_LIST = "\n".join(f"  - {k}: {v}" for k, v in TOOL_REGISTRY.items())
+
+ROUTER_PROMPT = f"""You are a routing agent for a personal AI companion system.
+Analyze the user's message and decide the best action.
+
+ACTIONS:
+- STORE_MEMORY: User is sharing personal facts, relationships, feelings, experiences, OR preferences about how they want to be spoken to.
+  Examples: "I hate my neighbour", "my son plays guitar", "I got a promotion", "I feel anxious",
+            "don't talk to me in long sentences", "please keep replies short"
+
+- RETRIEVE_MEMORY: User is asking about something from past conversations or needs recalled context.
+  Examples: "do you remember what I said?", "what did I tell you about my neighbour?", "how was I feeling?"
+
+- STORE_AND_RETRIEVE: User is correcting or updating something that has prior context.
+  Examples: "my neighbour is now good with me", "actually it was my son not my neighbour", "things have changed"
+
+- USE_TOOL: User wants to perform an action or get external information that requires a tool.
+  Available tools:
+{_TOOLS_LIST}
+  Examples: "remind me to take my medicine at 8pm", "what's the weather today", "schedule a doctor appointment"
+  Format for this action: USE_TOOL | tool_name | reason
+
+- DIRECT_CHAT: Pure greetings, small talk, or questions needing no memory and no tools.
+  Examples: "hey", "how are you", "tell me a joke", "ok", "thanks"
+
+User message: "{{text}}"
+Detected emotion: {{emotion}}
+
+Respond with ONLY one of these formats:
+ACTION | reason
+USE_TOOL | tool_name | reason"""
+
+VALID_ACTIONS = {"STORE_MEMORY", "RETRIEVE_MEMORY", "STORE_AND_RETRIEVE", "USE_TOOL", "DIRECT_CHAT"}
+
+
+@dataclass
+class RouteDecision:
+    action: str
+    reason: str
+    tool: Optional[str] = None
+
+
+def route(text: str, emotion: str = None) -> RouteDecision:
+    """LLM-based router. Falls back to STORE_MEMORY on failure."""
+    prompt = ROUTER_PROMPT.format(text=text, emotion=emotion or "none")
+    try:
+        response = requests.post(
+            f"{settings.ollama_url}/api/generate",
+            json={"model": settings.ollama_model, "prompt": prompt,
+                  "stream": False, "options": {"temperature": 0.0, "num_predict": 60}},
+            timeout=30
+        )
+        response.raise_for_status()
+        raw = response.json()["response"].strip()
+        print(f"[Router] Raw: {raw}")
+
+        parts = [p.strip() for p in raw.split("|")]
+        action = parts[0].upper().split()[0].rstrip(".,:")
+
+        if action not in VALID_ACTIONS:
+            print(f"[Router] Unknown action '{action}', defaulting to STORE_MEMORY")
+            return RouteDecision("STORE_MEMORY", "router fallback")
+
+        if action == "USE_TOOL":
+            tool   = parts[1] if len(parts) > 1 else "unknown"
+            reason = parts[2] if len(parts) > 2 else ""
+            # Validate tool name
+            if tool not in TOOL_REGISTRY:
+                closest = next((k for k in TOOL_REGISTRY if k in tool.lower()), None)
+                tool = closest or "web_search"
+            return RouteDecision("USE_TOOL", reason, tool=tool)
+
+        reason = parts[1] if len(parts) > 1 else ""
+        return RouteDecision(action, reason)
+
+    except Exception as e:
+        print(f"[Router] Failed: {e}")
+        return RouteDecision("STORE_MEMORY", "router error fallback")
+
+
+# ── STYLE FEEDBACK DETECTION ───────────────────────────────────────────────
+
+_STYLE_PROMPT = """Does this message express frustration, annoyance, or dissatisfaction with how the AI is speaking — such as being too long, too wordy, too formal, too slow, or too much?
+Answer YES or NO only.
+
+Message: "{text}" """
+
+
+def detect_style_frustration(text: str) -> bool:
+    """
+    Quick LLM check for implicit style feedback.
+    Returns True if the user is frustrated with the communication style.
+    Catches things like "you're talking for a year", "cut it out", "too much".
+    """
+    try:
+        response = requests.post(
+            f"{settings.ollama_url}/api/generate",
+            json={"model": settings.ollama_model,
+                  "prompt": _STYLE_PROMPT.format(text=text),
+                  "stream": False,
+                  "options": {"temperature": 0.0, "num_predict": 5}},
+            timeout=15
+        )
+        response.raise_for_status()
+        answer = response.json()["response"].strip().upper()
+        result = answer.startswith("YES")
+        if result:
+            print("[StyleCheck] Style frustration detected — injecting frustrated emotion")
+        return result
+    except Exception as e:
+        print(f"[StyleCheck] Failed: {e}")
+        return False
+
+
+# ── QUERY REWRITING ────────────────────────────────────────────────────────
+
+_REWRITE_PROMPT = """Rewrite the following user question into a concise, keyword-focused search query for a memory database.
+Focus on the core subject — who or what is being asked about.
+Do not answer the question. Output ONLY the rewritten query, nothing else.
+
+Examples:
+  "do you remember what I told you about my neighbour?" → "user neighbour relationship"
+  "how was I feeling last week?" → "user emotion feeling recent"
+  "what did I say about my son?" → "user son"
+
+Question: "{question}"
+Search query:"""
+
+
+def rewrite_query(question: str) -> str:
+    """Rewrite a vague retrieval question into clean search terms."""
+    try:
+        response = requests.post(
+            f"{settings.ollama_url}/api/generate",
+            json={"model": settings.ollama_model,
+                  "prompt": _REWRITE_PROMPT.format(question=question),
+                  "stream": False,
+                  "options": {"temperature": 0.0, "num_predict": 20}},
+            timeout=15
+        )
+        response.raise_for_status()
+        rewritten = response.json()["response"].strip().split("\n")[0]
+        print(f"[QueryRewrite] '{question}' → '{rewritten}'")
+        return rewritten
+    except Exception as e:
+        print(f"[QueryRewrite] Failed: {e}, using original")
+        return question
+
+
+# ── MEMORY AGENT CALLS ─────────────────────────────────────────────────────
+
+def store_and_retrieve(payload: dict) -> dict:
+    try:
+        r = requests.post(f"{settings.memory_agent_url}/process",
+                          json=payload, timeout=60)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"[Memory] Store failed: {e}")
+        return {"status": "error", "snapshot": None, "claims_extracted": 0}
+
+
+def retrieve_only(question: str) -> dict:
+    """Retrieve with query rewriting for better results."""
+    search_query = rewrite_query(question)
+    try:
+        r = requests.post(f"{settings.memory_agent_url}/retrieve",
+                          json={"question": search_query}, timeout=30)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"[Memory] Retrieve failed: {e}")
+        return {}
+
+
+# ── CONVERSATION SUMMARIZATION ─────────────────────────────────────────────
+
+_SUMMARY_PROMPT = """Summarize the key facts, emotions, and events from this conversation segment.
+Focus only on information worth remembering for future conversations — skip small talk.
+Be concise and factual.
+
+Conversation:
+{turns}
+
+Summary:"""
+
+# Turn counter per speaker — triggers summarization every N turns
+_turn_counts: dict[str, int] = {}
+
+
+def maybe_summarize(speaker_id: str, last_turns: list) -> bool:
+    """
+    Increment turn counter for this speaker. If it hits the threshold,
+    summarize the last N turns and store as an EVENT in memory.
+    Returns True if summarization ran.
+    """
+    n = settings.summarize_every_n_turns
+    if n <= 0 or not last_turns:
+        return False
+
+    _turn_counts[speaker_id] = _turn_counts.get(speaker_id, 0) + 1
+
+    if _turn_counts[speaker_id] < n:
+        return False
+
+    _turn_counts[speaker_id] = 0  # reset counter
+
+    # Format turns for the summarizer
+    turns_text = "\n".join(
+        f"{t['speaker'].capitalize()}: {t['text']}"
+        for t in last_turns
+    )
+
+    try:
+        response = requests.post(
+            f"{settings.ollama_url}/api/generate",
+            json={"model": settings.ollama_model,
+                  "prompt": _SUMMARY_PROMPT.format(turns=turns_text),
+                  "stream": False,
+                  "options": {"temperature": 0.2, "num_predict": 200}},
+            timeout=45
+        )
+        response.raise_for_status()
+        summary = response.json()["response"].strip()
+        print(f"[Summarizer] Summary: {summary[:100]}...")
+
+        # Store as a memory process call — the extractor will pull facts from it
+        store_and_retrieve({
+            "text": f"[Conversation summary]: {summary}",
+            "speaker": speaker_id,
+            "emotion": None,
+            "scene": "conversation_summary",
+            "metadata": {"source": "auto_summarizer"}
+        })
+        return True
+
+    except Exception as e:
+        print(f"[Summarizer] Failed: {e}")
+        return False
+
+
+# ── MEMORY FORMATTING ──────────────────────────────────────────────────────
+
+def _format_memory_context(snapshot: dict) -> str:
+    if not snapshot:
+        return ""
+    parts = []
+    active = snapshot.get("active_states", [])
+    if active:
+        facts = [f"{s['entity']} {s['attribute']} = {s['value']}" for s in active]
+        parts.append("Current facts: " + ", ".join(facts))
+    for b in snapshot.get("relevant_beliefs", []):
+        history = b.get("history", [])
+        if history:
+            current = b.get("current_value", history[-1].get("value", ""))
+            parts.append(f"User's belief about {b['about']}: {current}")
+    events = [e["event_type"] for e in snapshot.get("recent_events", []) if e.get("event_type")]
+    if events:
+        parts.append("Recent events: " + ", ".join(events))
+    return "\n".join(parts)
+
+
+# ── ELARA SESSION STATE ────────────────────────────────────────────────────
+
+_elara_sessions: dict[str, dict] = {}
+
+
+def elara_chat(
+    user_text: str,
+    snapshot: dict = None,
+    emotion: str = None,
+    speaker_id: str = "user",
+    scene: str = None,
+) -> dict:
+    memory_context = _format_memory_context(snapshot)
+    if emotion and emotion.lower() not in ("normal", "neutral", "none", "unknown"):
+        prefix = f"Sensor-detected emotion: {emotion}."
+        memory_context = f"{prefix}\n{memory_context}" if memory_context else prefix
+
+    payload = {
+        "message": user_text,
+        "state": _elara_sessions.get(speaker_id),
+        "backend": "ollama",
+        "memory_context": memory_context or None,
+    }
+    try:
+        r = requests.post(f"{settings.elara_url}/chat", json=payload, timeout=60)
+        r.raise_for_status()
+        data = r.json()
+        _elara_sessions[speaker_id] = data["state"]
+        diag = data.get("diagnostics", {})
+        print(f"[Elara] affect={diag.get('affect')} action={diag.get('ucb_action_id')}")
+        return {
+            "reply": data["reply"],
+            "affect": diag.get("affect", "unknown"),
+            "caregiver_alert": diag.get("caregiver_alert", False),
+            "last_turns": data["state"].get("history", []),
+        }
+    except Exception as e:
+        print(f"[Elara] Failed: {e}")
+        return {
+            "reply": "I'm having a little trouble right now. Could you try again?",
+            "affect": "unknown",
+            "caregiver_alert": False,
+            "last_turns": [],
+        }
+
+
+# ── TOOL EXECUTION ─────────────────────────────────────────────────────────
+
+def run_tool(tool_name: str, user_text: str) -> str:
+    """Execute a tool and return its result string."""
+    print(f"[Tool] Running: {tool_name}")
+    return _run_tool(tool_name, user_text)

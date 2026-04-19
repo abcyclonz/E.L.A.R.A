@@ -3,15 +3,15 @@ import numpy as np
 import threading
 import queue
 
-# Import our custom modules
+
 from mic_stream import MicrophoneStream
 from vad_module import VADFilter
 from speaker_manager import SpeakerManager
 from stt_module import Transcriber
 
-# --- CONFIGURATION ---
-SILENCE_TIMEOUT = 0.8  # How long to wait after speech ends to process (seconds)
-MIN_AUDIO_LEN = 0.5    # Ignore sounds shorter than this (seconds)
+
+SILENCE_TIMEOUT = 0.8  
+MIN_AUDIO_LEN = 0.5    
 
 class VoiceAssistantCore:
     def __init__(self):
@@ -108,9 +108,7 @@ class VoiceAssistantCore:
                                     # --- FINAL OUTPUT ---
                                     print(f"🎤 {output['speaker']} ({output['confidence']:.2f}): {output['text']}")
                                     
-                                    # Output to your main project (e.g., via queue or socket)
-                                    # send_to_llm(output)
-                                
+                                    
                                 # Reset state
                                 audio_buffer = []
                                 is_speaking = False

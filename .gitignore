@@ -1,18 +1,32 @@
-# Ignore virtual environments inside MIC
+# Virtual environments
 MIC/.venv/
 MIC/venv/
+agents/memory/venv/
+agents/*/venv/
+agents/*/.venv/
 
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
 # Environment files
 .env
+*.env
 
 # IDE
 .vscode/
 .idea/
-MIC/.venv/
-MIC/venv/
-__pycache__/
-.env
+
+# ML model caches (large files)
+MIC/tmp_model/
+
+# Reference system (not part of this project)
+LLM-Agent-For--elders-main/
+
+# Bandit lock files
+agents/elara/tables/.bandit.lock
+
+# Logs
+*.log

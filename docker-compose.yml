@@ -1,0 +1,69 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: memory_db
+    environment:
+      POSTGRES_USER: memory_user
+      POSTGRES_PASSWORD: memory_pass
+      POSTGRES_DB: memory_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./agents/memory/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memory_user -d memory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  memory_agent:
+    build: ./agents/memory
+    container_name: memory_agent
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://memory_user:memory_pass@db:5432/memory_db
+      OLLAMA_URL: http://172.17.0.1:11434
+      OLLAMA_MODEL: mistral:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./agents/memory/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  elara:
+    build: ./agents/elara
+    container_name: elara
+    ports:
+      - "8002:8002"
+    environment:
+      OLLAMA_URL: http://172.17.0.1:11434
+      OLLAMA_MODEL: mistral:latest
+    volumes:
+      - elara_bandit_tables:/app/tables
+      - ./agents/elara/conversation_agent:/app/conversation_agent
+      - ./agents/elara/learning_agent:/app/learning_agent
+    command: uvicorn app:app --host 0.0.0.0 --port 8002 --reload
+
+  orchestrator:
+    build: ./agents/orchestrator
+    container_name: orchestrator
+    ports:
+      - "8001:8001"
+    environment:
+      MEMORY_AGENT_URL: http://memory_agent:8000
+      ELARA_URL: http://elara:8002
+      OLLAMA_URL: http://172.17.0.1:11434
+      OLLAMA_MODEL: mistral:latest
+    depends_on:
+      - memory_agent
+      - elara
+    volumes:
+      - ./agents/orchestrator/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+volumes:
+  postgres_data:
+  elara_bandit_tables:
