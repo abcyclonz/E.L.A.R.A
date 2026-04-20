@@ -74,7 +74,7 @@ def handle_input(req: AgentInput):
 
     elif decision.action == "USE_TOOL":
         tool_called = decision.tool
-        tool_result = run_tool(tool_called, req.text)
+        tool_result = run_tool(tool_called, req.text, speaker_id)
         print(f"[Orchestrator] Tool result: {tool_result}")
         # Pass tool output to Elara as memory context so it can formulate the reply
         snapshot = {"tool_result": tool_result, "active_states": [], "relevant_beliefs": [], "recent_events": []}

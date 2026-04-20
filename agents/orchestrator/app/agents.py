@@ -3,7 +3,7 @@ Orchestrator agents module.
 
 Capabilities:
   - LLM-based router (STORE_MEMORY | RETRIEVE_MEMORY | STORE_AND_RETRIEVE | DIRECT_CHAT | USE_TOOL)
-  - Tool registry (stub — add real implementations later)
+  - Tool execution via MCP (web_search, reminder, calendar) with LLM param extraction
   - Query rewriting before memory retrieval
   - Conversation summarization every N turns
   - Implicit style-feedback detection → emotion injection
@@ -16,28 +16,61 @@ from typing import Optional
 import json
 import requests
 from app.config import settings
+from app.tool_client import call_mcp_tool
 
 
 # ── TOOL REGISTRY ──────────────────────────────────────────────────────────
-# Add new tools here. Each entry: "tool_id": "one-line description for the router"
+# Each entry: "tool_id": "one-line description for the router"
 # The router sees these descriptions when deciding whether to call a tool.
 
 TOOL_REGISTRY: dict[str, str] = {
-    "calendar":      "Schedule events, add appointments, set reminders for a specific date/time",
-    "reminder":      "Set a one-time or recurring reminder (no specific calendar date needed)",
-    "web_search":    "Search the web for current information, news, facts, or weather",
-    "health_monitor":"Check the user's health metrics or vitals from connected sensors",
+    "calendar":       "Schedule events or appointments on a specific date/time",
+    "reminder":       "Set a reminder or check existing reminders (no specific date needed)",
+    "web_search":     "Search the web for current information, news, facts, or weather",
+    "health_monitor": "Check the user's health metrics or vitals from connected sensors",
 }
 
-# Tool implementations — replace stubs with real code when ready
-def _run_tool(tool_name: str, user_text: str) -> str:
-    stubs = {
-        "calendar":      "Calendar tool not yet connected. Coming soon.",
-        "reminder":      "Reminder tool not yet connected. Coming soon.",
-        "web_search":    "Web search tool not yet connected. Coming soon.",
-        "health_monitor":"Health monitor tool not yet connected. Coming soon.",
-    }
-    return stubs.get(tool_name, f"Unknown tool: {tool_name}")
+# ── TOOL PARAMETER EXTRACTION ──────────────────────────────────────────────
+
+_TOOL_SCHEMAS: dict[str, str] = {
+    "web_search":  '{"query": "<concise search query derived from the user message>"}',
+    "reminder":    '{"text": "<what to remind about>", "when": "<time or date, e.g. 8pm, tomorrow morning>"}',
+    "calendar":    '{"title": "<event title>", "when": "<date and time>", "description": "<optional details>"}',
+}
+
+_PARAMS_PROMPT = """Extract the parameters for the tool call from the user's message.
+
+Tool: {tool_name}
+User message: "{text}"
+Required JSON schema: {schema}
+
+Rules:
+- Output ONLY valid JSON. No explanation.
+- If a field cannot be determined, use a sensible default or empty string.
+- For "when" fields, preserve the exact time expression the user said (e.g. "8pm tonight", "next Monday").
+
+JSON:"""
+
+
+def extract_tool_params(tool_name: str, user_text: str) -> dict:
+    """Use LLM to pull structured params from free-form user text."""
+    schema = _TOOL_SCHEMAS.get(tool_name, '{"query": "<user message>"}')
+    prompt = _PARAMS_PROMPT.format(tool_name=tool_name, text=user_text, schema=schema)
+    try:
+        response = requests.post(
+            f"{settings.ollama_url}/api/generate",
+            json={"model": settings.ollama_model, "prompt": prompt,
+                  "stream": False, "options": {"temperature": 0.0, "num_predict": 100}},
+            timeout=20
+        )
+        response.raise_for_status()
+        raw = response.json()["response"].strip()
+        start, end = raw.find("{"), raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(raw[start:end])
+    except Exception as e:
+        print(f"[ToolParams] Extraction failed: {e}")
+    return {"query": user_text}  # safe fallback
 
 
 # ── ROUTER ─────────────────────────────────────────────────────────────────
@@ -352,7 +385,37 @@ def elara_chat(
 
 # ── TOOL EXECUTION ─────────────────────────────────────────────────────────
 
-def run_tool(tool_name: str, user_text: str) -> str:
-    """Execute a tool and return its result string."""
-    print(f"[Tool] Running: {tool_name}")
-    return _run_tool(tool_name, user_text)
+# Keywords that mean the user wants to LIST rather than SET
+_LIST_KEYWORDS = ("list", "show", "what are", "do i have", "any reminders", "my reminders",
+                  "what's on", "what is on", "upcoming", "scheduled")
+
+
+def run_tool(tool_name: str, user_text: str, speaker_id: str = "user") -> str:
+    """Execute a tool via MCP and return its result string."""
+    print(f"[Tool] Running: {tool_name} for {speaker_id}")
+    text_lower = user_text.lower()
+
+    if tool_name == "web_search":
+        args = extract_tool_params("web_search", user_text)
+        return call_mcp_tool(settings.web_search_mcp_url, "search", args)
+
+    if tool_name == "reminder":
+        if any(kw in text_lower for kw in _LIST_KEYWORDS):
+            return call_mcp_tool(settings.assistant_mcp_url, "list_reminders",
+                                 {"speaker_id": speaker_id})
+        args = extract_tool_params("reminder", user_text)
+        args["speaker_id"] = speaker_id
+        return call_mcp_tool(settings.assistant_mcp_url, "set_reminder", args)
+
+    if tool_name == "calendar":
+        if any(kw in text_lower for kw in _LIST_KEYWORDS):
+            return call_mcp_tool(settings.assistant_mcp_url, "list_calendar_events",
+                                 {"speaker_id": speaker_id})
+        args = extract_tool_params("calendar", user_text)
+        args["speaker_id"] = speaker_id
+        return call_mcp_tool(settings.assistant_mcp_url, "add_calendar_event", args)
+
+    if tool_name == "health_monitor":
+        return "Health monitor is not yet connected to sensor data."
+
+    return f"Unknown tool: {tool_name}"

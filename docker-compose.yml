@@ -47,6 +47,26 @@ services:
       - ./agents/elara/learning_agent:/app/learning_agent
     command: uvicorn app:app --host 0.0.0.0 --port 8002 --reload
 
+  web_search_tool:
+    build: ./agents/tools/web_search
+    container_name: web_search_tool
+    ports:
+      - "8010:8010"
+    environment:
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      PORT: 8010
+
+  assistant_tool:
+    build: ./agents/tools/assistant
+    container_name: assistant_tool
+    ports:
+      - "8011:8011"
+    environment:
+      DB_PATH: /data/assistant.db
+      PORT: 8011
+    volumes:
+      - assistant_data:/data
+
   orchestrator:
     build: ./agents/orchestrator
     container_name: orchestrator
@@ -57,9 +77,14 @@ services:
       ELARA_URL: http://elara:8002
       OLLAMA_URL: http://172.17.0.1:11434
       OLLAMA_MODEL: mistral:latest
+      WEB_SEARCH_MCP_URL: http://web_search_tool:8010
+      ASSISTANT_MCP_URL: http://assistant_tool:8011
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
     depends_on:
       - memory_agent
       - elara
+      - web_search_tool
+      - assistant_tool
     volumes:
       - ./agents/orchestrator/app:/app/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
@@ -67,3 +92,4 @@ services:
 volumes:
   postgres_data:
   elara_bandit_tables:
+  assistant_data:
