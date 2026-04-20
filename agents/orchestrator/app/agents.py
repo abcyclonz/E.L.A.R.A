@@ -104,9 +104,12 @@ ACTIONS:
 User message: "{{text}}"
 Detected emotion: {{emotion}}
 
-Respond with ONLY one of these formats:
-ACTION | reason
-USE_TOOL | tool_name | reason"""
+Output exactly ONE line. Replace the placeholders with real values:
+STORE_MEMORY | <why>
+RETRIEVE_MEMORY | <why>
+STORE_AND_RETRIEVE | <why>
+DIRECT_CHAT | <why>
+USE_TOOL | <tool_name> | <why>"""
 
 VALID_ACTIONS = {"STORE_MEMORY", "RETRIEVE_MEMORY", "STORE_AND_RETRIEVE", "USE_TOOL", "DIRECT_CHAT"}
 
@@ -132,24 +135,29 @@ def route(text: str, emotion: str = None) -> RouteDecision:
         raw = response.json()["response"].strip()
         print(f"[Router] Raw: {raw}")
 
-        parts = [p.strip() for p in raw.split("|")]
-        action = parts[0].upper().split()[0].rstrip(".,:")
+        # Scan every line — LLMs sometimes echo the format header before the answer
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            action = parts[0].upper().split()[0].rstrip(".,:")
+            if action not in VALID_ACTIONS:
+                continue
 
-        if action not in VALID_ACTIONS:
-            print(f"[Router] Unknown action '{action}', defaulting to STORE_MEMORY")
-            return RouteDecision("STORE_MEMORY", "router fallback")
+            if action == "USE_TOOL":
+                tool   = parts[1] if len(parts) > 1 else "unknown"
+                reason = parts[2] if len(parts) > 2 else ""
+                if tool not in TOOL_REGISTRY:
+                    closest = next((k for k in TOOL_REGISTRY if k in tool.lower()), None)
+                    tool = closest or "web_search"
+                return RouteDecision("USE_TOOL", reason, tool=tool)
 
-        if action == "USE_TOOL":
-            tool   = parts[1] if len(parts) > 1 else "unknown"
-            reason = parts[2] if len(parts) > 2 else ""
-            # Validate tool name
-            if tool not in TOOL_REGISTRY:
-                closest = next((k for k in TOOL_REGISTRY if k in tool.lower()), None)
-                tool = closest or "web_search"
-            return RouteDecision("USE_TOOL", reason, tool=tool)
+            reason = parts[1] if len(parts) > 1 else ""
+            return RouteDecision(action, reason)
 
-        reason = parts[1] if len(parts) > 1 else ""
-        return RouteDecision(action, reason)
+        print(f"[Router] No valid action found in response, defaulting to STORE_MEMORY")
+        return RouteDecision("STORE_MEMORY", "router fallback")
 
     except Exception as e:
         print(f"[Router] Failed: {e}")
