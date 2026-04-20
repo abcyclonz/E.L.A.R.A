@@ -1,35 +1,40 @@
 """
-Web Search MCP Server — wraps Tavily API.
+Web Search tool server — FastAPI REST interface wrapping Tavily API.
 
-Exposes one tool: search(query, max_results)
-Runs as SSE server on port 8010.
+POST /call/search   {"query": "...", "max_results": 5}
+GET  /health
 """
-from mcp.server.fastmcp import FastMCP
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import httpx
 import os
-import json
 
-mcp = FastMCP("Web Search")
+app = FastAPI(title="Web Search Tool")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 TAVILY_URL = "https://api.tavily.com/search"
 
 
-@mcp.tool()
-def search(query: str, max_results: int = 5) -> str:
-    """Search the web for current information, news, weather, or facts."""
+class SearchRequest(BaseModel):
+    query: str
+    max_results: int = 5
+
+
+@app.post("/call/search")
+def search(req: SearchRequest):
     if not TAVILY_API_KEY:
-        return "Web search is not configured. Ask the user to provide a TAVILY_API_KEY."
+        return {"result": "Web search is not configured — TAVILY_API_KEY is missing."}
 
     payload = {
         "api_key": TAVILY_API_KEY,
-        "query": query,
-        "max_results": max_results,
+        "query": req.query,
+        "max_results": req.max_results,
         "search_depth": "basic",
         "include_answer": True,
         "include_raw_content": False,
     }
-
     try:
         r = httpx.post(TAVILY_URL, json=payload, timeout=15)
         r.raise_for_status()
@@ -38,20 +43,19 @@ def search(query: str, max_results: int = 5) -> str:
         parts = []
         if data.get("answer"):
             parts.append(f"Answer: {data['answer']}")
-
-        for result in data.get("results", [])[:max_results]:
+        for result in data.get("results", [])[:req.max_results]:
             title = result.get("title", "")
             content = result.get("content", "")[:300]
             parts.append(f"• {title}: {content}")
 
-        return "\n".join(parts) if parts else "No results found."
+        return {"result": "\n".join(parts) if parts else "No results found."}
 
     except httpx.HTTPStatusError as e:
-        return f"Search API error {e.response.status_code}: {e.response.text[:200]}"
+        return {"result": f"Search API error {e.response.status_code}."}
     except Exception as e:
-        return f"Search failed: {e}"
+        return {"result": f"Search failed: {e}"}
 
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8010"))
-    mcp.run(transport="sse", host="0.0.0.0", port=port)
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "web_search_tool"}

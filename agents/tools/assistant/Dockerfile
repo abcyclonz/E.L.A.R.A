@@ -6,4 +6,4 @@ COPY server.py .
 RUN mkdir -p /data
 VOLUME ["/data"]
 EXPOSE 8011
-CMD ["python", "server.py"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8011"]

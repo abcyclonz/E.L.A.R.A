@@ -1,31 +1,22 @@
 """
-MCP tool client — calls FastMCP SSE servers from the orchestrator.
+Tool client — calls the web_search and assistant tool servers over plain HTTP.
 
-Each tool server exposes an SSE endpoint at /sse. We open a session,
-call the tool, collect the text response, and return it as a plain string.
-
-call_mcp_tool() is synchronous so it works inside FastAPI sync route handlers
-(which run in a thread pool, with no existing event loop).
+Each tool server exposes POST /call/<tool_name> and returns {"result": "string"}.
 """
 from __future__ import annotations
-import asyncio
-from mcp.client.sse import sse_client
-from mcp import ClientSession
-
-
-async def _call_async(server_url: str, tool_name: str, args: dict) -> str:
-    sse_url = server_url.rstrip("/") + "/sse"
-    try:
-        async with sse_client(url=sse_url) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, args)
-                texts = [c.text for c in result.content if hasattr(c, "text")]
-                return "\n".join(texts) if texts else "Tool returned no output."
-    except Exception as e:
-        return f"Tool unavailable ({tool_name}): {e}"
+import requests
 
 
 def call_mcp_tool(server_url: str, tool_name: str, args: dict) -> str:
-    """Synchronous wrapper — safe to call from any sync context."""
-    return asyncio.run(_call_async(server_url, tool_name, args))
+    """POST args to <server_url>/call/<tool_name> and return the result string."""
+    url = f"{server_url.rstrip('/')}/call/{tool_name}"
+    try:
+        r = requests.post(url, json=args, timeout=20)
+        r.raise_for_status()
+        return r.json().get("result", "Tool returned no output.")
+    except requests.exceptions.ConnectionError:
+        return f"Tool server unreachable ({tool_name}). Is it running?"
+    except requests.exceptions.Timeout:
+        return f"Tool call timed out ({tool_name})."
+    except Exception as e:
+        return f"Tool call failed ({tool_name}): {e}"

@@ -1,22 +1,23 @@
 """
-Assistant Tools MCP Server — reminders and calendar backed by SQLite.
+Assistant tool server — FastAPI REST interface for reminders and calendar (SQLite).
 
-Tools:
-  set_reminder(text, when, speaker_id)
-  list_reminders(speaker_id)
-  complete_reminder(text_match, speaker_id)
-  add_calendar_event(title, when, description, speaker_id)
-  list_calendar_events(speaker_id, days_ahead)
-
-Runs as SSE server on port 8011.
+POST /call/set_reminder        {"text": "...", "when": "...", "speaker_id": "user"}
+POST /call/list_reminders      {"speaker_id": "user"}
+POST /call/complete_reminder   {"text_match": "...", "speaker_id": "user"}
+POST /call/add_calendar_event  {"title": "...", "when": "...", "description": "", "speaker_id": "user"}
+POST /call/list_calendar_events {"speaker_id": "user"}
+GET  /health
 """
-from mcp.server.fastmcp import FastMCP
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import sqlite3
 import os
-from datetime import datetime, timedelta
 from contextlib import contextmanager
+from datetime import datetime
 
-mcp = FastMCP("Assistant Tools")
+app = FastAPI(title="Assistant Tools")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 DB_PATH = os.getenv("DB_PATH", "/data/assistant.db")
 
@@ -58,80 +59,96 @@ def _db():
         conn.close()
 
 
-# ── REMINDERS ─────────────────────────────────────────────────────────────────
+# ── Request models ─────────────────────────────────────────────────────────
 
-@mcp.tool()
-def set_reminder(text: str, when: str, speaker_id: str = "user") -> str:
-    """Set a reminder for the user at a specific time or date."""
+class ReminderSetReq(BaseModel):
+    text: str
+    when: str
+    speaker_id: str = "user"
+
+class ReminderListReq(BaseModel):
+    speaker_id: str = "user"
+
+class ReminderCompleteReq(BaseModel):
+    text_match: str
+    speaker_id: str = "user"
+
+class CalendarAddReq(BaseModel):
+    title: str
+    when: str
+    description: str = ""
+    speaker_id: str = "user"
+
+class CalendarListReq(BaseModel):
+    speaker_id: str = "user"
+
+
+# ── Reminder endpoints ─────────────────────────────────────────────────────
+
+@app.post("/call/set_reminder")
+def set_reminder(req: ReminderSetReq):
     with _db() as conn:
         conn.execute(
             "INSERT INTO reminders (speaker_id, text, when_time, created_at) VALUES (?, ?, ?, ?)",
-            (speaker_id, text, when, datetime.now().isoformat())
+            (req.speaker_id, req.text, req.when, datetime.now().isoformat())
         )
-    return f"Reminder set: '{text}' — I'll remind you at {when}."
+    return {"result": f"Reminder set: '{req.text}' at {req.when}."}
 
 
-@mcp.tool()
-def list_reminders(speaker_id: str = "user") -> str:
-    """List all pending reminders for the user."""
+@app.post("/call/list_reminders")
+def list_reminders(req: ReminderListReq):
     with _db() as conn:
         rows = conn.execute(
             "SELECT text, when_time FROM reminders WHERE speaker_id=? AND completed=0 ORDER BY created_at DESC LIMIT 10",
-            (speaker_id,)
+            (req.speaker_id,)
         ).fetchall()
-
     if not rows:
-        return "You have no pending reminders."
-
+        return {"result": "You have no pending reminders."}
     lines = [f"• {r['text']} — {r['when_time']}" for r in rows]
-    return "Your pending reminders:\n" + "\n".join(lines)
+    return {"result": "Your pending reminders:\n" + "\n".join(lines)}
 
 
-@mcp.tool()
-def complete_reminder(text_match: str, speaker_id: str = "user") -> str:
-    """Mark a reminder as done (matches by partial text)."""
+@app.post("/call/complete_reminder")
+def complete_reminder(req: ReminderCompleteReq):
     with _db() as conn:
         cursor = conn.execute(
             "UPDATE reminders SET completed=1 WHERE speaker_id=? AND text LIKE ? AND completed=0",
-            (speaker_id, f"%{text_match}%")
+            (req.speaker_id, f"%{req.text_match}%")
         )
         count = cursor.rowcount
-
     if count:
-        return f"Done — marked {count} reminder(s) as complete."
-    return "No matching pending reminder found."
+        return {"result": f"Done — marked {count} reminder(s) as complete."}
+    return {"result": "No matching pending reminder found."}
 
 
-# ── CALENDAR ──────────────────────────────────────────────────────────────────
+# ── Calendar endpoints ─────────────────────────────────────────────────────
 
-@mcp.tool()
-def add_calendar_event(title: str, when: str, description: str = "", speaker_id: str = "user") -> str:
-    """Add an event to the user's calendar."""
+@app.post("/call/add_calendar_event")
+def add_calendar_event(req: CalendarAddReq):
     with _db() as conn:
         conn.execute(
             "INSERT INTO calendar_events (speaker_id, title, when_time, description, created_at) VALUES (?, ?, ?, ?, ?)",
-            (speaker_id, title, when, description, datetime.now().isoformat())
+            (req.speaker_id, req.title, req.when, req.description, datetime.now().isoformat())
         )
-    return f"Event added: '{title}' on {when}."
+    return {"result": f"Event added: '{req.title}' on {req.when}."}
 
 
-@mcp.tool()
-def list_calendar_events(speaker_id: str = "user", days_ahead: int = 7) -> str:
-    """List upcoming calendar events for the user."""
+@app.post("/call/list_calendar_events")
+def list_calendar_events(req: CalendarListReq):
     with _db() as conn:
         rows = conn.execute(
             "SELECT title, when_time, description FROM calendar_events WHERE speaker_id=? ORDER BY created_at DESC LIMIT 15",
-            (speaker_id,)
+            (req.speaker_id,)
         ).fetchall()
-
     if not rows:
-        return "No upcoming calendar events."
+        return {"result": "No upcoming calendar events."}
+    lines = [
+        f"• {r['title']} — {r['when_time']}" + (f" ({r['description']})" if r["description"] else "")
+        for r in rows
+    ]
+    return {"result": "Your upcoming events:\n" + "\n".join(lines)}
 
-    lines = [f"• {r['title']} — {r['when_time']}" + (f" ({r['description']})" if r['description'] else "")
-             for r in rows]
-    return "Your upcoming events:\n" + "\n".join(lines)
 
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8011"))
-    mcp.run(transport="sse", host="0.0.0.0", port=port)
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "assistant_tool"}
