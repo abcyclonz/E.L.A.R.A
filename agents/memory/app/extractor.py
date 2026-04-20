@@ -3,6 +3,7 @@ import re
 import requests
 from app.config import settings
 from app.models import ExtractedClaim, ExtractionResult, ClaimType
+from app import embed_cache
 
 EXTRACTION_PROMPT = """You are a memory extraction engine. Extract structured memory claims from the user's message.
 
@@ -143,7 +144,11 @@ def classify_intent(question: str) -> str:
 
 
 def embed_text(text: str) -> list[float]:
-    """Generate embedding using nomic-embed-text via Ollama."""
+    """Generate embedding using nomic-embed-text via Ollama, with Redis cache."""
+    cached = embed_cache.get(text)
+    if cached is not None:
+        print("[Embedder] Cache hit")
+        return cached
     try:
         response = requests.post(
             f"{settings.ollama_url}/api/embeddings",
@@ -151,7 +156,9 @@ def embed_text(text: str) -> list[float]:
             timeout=30
         )
         response.raise_for_status()
-        return response.json()["embedding"]
+        vector = response.json()["embedding"]
+        embed_cache.put(text, vector)
+        return vector
     except Exception as e:
         print(f"[Embedder] Failed: {e}")
         return []

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # nomic-embed-text = 768, mistral = 4096, llama3.2 = 3072
     embedding_dim: int = 768
 
+    # Redis
+    redis_url: str = "redis://redis:6379/0"
+
     class Config:
         env_file = ".env"
 

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     web_search_mcp_url: str = "http://web_search_tool:8010"
     assistant_mcp_url: str = "http://assistant_tool:8011"
 
+    # Redis
+    redis_url: str = "redis://redis:6379/0"
+
     # Tavily key (read here so we can surface missing-key errors early)
     tavily_api_key: str = ""
 

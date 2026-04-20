@@ -1,4 +1,18 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   db:
     image: pgvector/pgvector:pg16
     container_name: memory_db
@@ -26,8 +40,11 @@ services:
       DATABASE_URL: postgresql://memory_user:memory_pass@db:5432/memory_db
       OLLAMA_URL: http://172.17.0.1:11434
       OLLAMA_MODEL: mistral:latest
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./agents/memory/app:/app/app
@@ -80,11 +97,13 @@ services:
       WEB_SEARCH_MCP_URL: http://web_search_tool:8010
       ASSISTANT_MCP_URL: http://assistant_tool:8011
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       - memory_agent
       - elara
       - web_search_tool
       - assistant_tool
+      - redis
     volumes:
       - ./agents/orchestrator/app:/app/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
@@ -93,3 +112,4 @@ volumes:
   postgres_data:
   elara_bandit_tables:
   assistant_data:
+  redis_data:

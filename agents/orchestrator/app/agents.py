@@ -17,6 +17,7 @@ import json
 import requests
 from app.config import settings
 from app.tool_client import call_mcp_tool
+from app import cache
 
 
 # ── TOOL REGISTRY ──────────────────────────────────────────────────────────
@@ -261,10 +262,6 @@ Conversation:
 
 Summary:"""
 
-# Turn counter per speaker — triggers summarization every N turns
-_turn_counts: dict[str, int] = {}
-
-
 def maybe_summarize(speaker_id: str, last_turns: list) -> bool:
     """
     Increment turn counter for this speaker. If it hits the threshold,
@@ -275,12 +272,12 @@ def maybe_summarize(speaker_id: str, last_turns: list) -> bool:
     if n <= 0 or not last_turns:
         return False
 
-    _turn_counts[speaker_id] = _turn_counts.get(speaker_id, 0) + 1
+    count = cache.incr_turn_count(speaker_id)
 
-    if _turn_counts[speaker_id] < n:
+    if count < n:
         return False
 
-    _turn_counts[speaker_id] = 0  # reset counter
+    cache.reset_turn_count(speaker_id)
 
     # Format turns for the summarizer
     turns_text = "\n".join(
@@ -339,9 +336,6 @@ def _format_memory_context(snapshot: dict) -> str:
 
 # ── ELARA SESSION STATE ────────────────────────────────────────────────────
 
-_elara_sessions: dict[str, dict] = {}
-
-
 def elara_chat(
     user_text: str,
     snapshot: dict = None,
@@ -356,7 +350,7 @@ def elara_chat(
 
     payload = {
         "message": user_text,
-        "state": _elara_sessions.get(speaker_id),
+        "state": cache.get_session(speaker_id),
         "backend": "ollama",
         "memory_context": memory_context or None,
     }
@@ -364,7 +358,7 @@ def elara_chat(
         r = requests.post(f"{settings.elara_url}/chat", json=payload, timeout=60)
         r.raise_for_status()
         data = r.json()
-        _elara_sessions[speaker_id] = data["state"]
+        cache.set_session(speaker_id, data["state"])
         diag = data.get("diagnostics", {})
         print(f"[Elara] affect={diag.get('affect')} action={diag.get('ucb_action_id')}")
         return {
