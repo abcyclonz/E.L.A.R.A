@@ -288,9 +288,11 @@ def maybe_summarize(speaker_id: str, last_turns: list) -> bool:
     cache.reset_turn_count(speaker_id)
 
     # Format turns for the summarizer
+    # Elara history uses {"role": ..., "content": ...}
     turns_text = "\n".join(
-        f"{t['speaker'].capitalize()}: {t['text']}"
+        f"{t.get('role', t.get('speaker', 'unknown')).capitalize()}: {t.get('content', t.get('text', ''))}"
         for t in last_turns
+        if isinstance(t, dict)
     )
 
     try:
