@@ -76,3 +76,27 @@ CREATE TABLE IF NOT EXISTS topic_frequency (
     count       INTEGER NOT NULL DEFAULT 1,
     last_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ─────────────────────────────────────────
+-- 6. EPISODES  (verbatim conversation turns for episodic recall)
+--    One row per turn-pair: the user message + Elara's reply, embedded
+--    together so semantic search finds "the conversation about X".
+-- ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS episodes (
+    id              SERIAL PRIMARY KEY,
+    speaker_id      TEXT NOT NULL DEFAULT 'user',
+    user_turn       TEXT NOT NULL,
+    assistant_turn  TEXT,
+    embedding       VECTOR(768),
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_episodes_speaker
+    ON episodes(speaker_id);
+
+CREATE INDEX IF NOT EXISTS idx_episodes_timestamp
+    ON episodes(timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_episodes_embedding
+    ON episodes USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 50);

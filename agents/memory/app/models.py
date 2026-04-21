@@ -85,3 +85,30 @@ class ProcessResponse(BaseModel):
     status: str = "ok"
     claims_extracted: int = 0
     snapshot: Optional[MemorySnapshot] = None
+
+
+# ── Episodic memory ────────────────────────────────────────────────────────
+
+class EpisodeRequest(BaseModel):
+    speaker_id: str = "user"
+    user_turn: str
+    assistant_turn: Optional[str] = None
+
+
+class RecallRequest(BaseModel):
+    question: str
+    speaker_id: str = "user"
+    top_k: int = 3
+
+
+class Episode(BaseModel):
+    id: int
+    speaker_id: str
+    user_turn: str
+    assistant_turn: Optional[str]
+    timestamp: datetime
+    similarity: Optional[float] = None
+
+
+class RecallResponse(BaseModel):
+    episodes: List[Episode]

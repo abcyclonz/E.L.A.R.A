@@ -4,6 +4,7 @@ from app.models import AgentInput, OrchestrationResult
 from app.agents import (
     route, store_and_retrieve, retrieve_only, elara_chat,
     detect_style_frustration, maybe_summarize, run_tool,
+    store_episode, recall_episodes,
     _GREETING_RE,
 )
 
@@ -34,6 +35,7 @@ def handle_input(req: AgentInput):
     DIRECT_CHAT        → skip memory entirely, go straight to Elara
     """
     snapshot         = None
+    episodes         = None
     memory_used      = False
     memory_stored    = False
     claims_extracted = 0
@@ -65,6 +67,8 @@ def handle_input(req: AgentInput):
     elif decision.action == "RETRIEVE_MEMORY":
         snapshot = retrieve_only(req.text)
         memory_used = bool(snapshot and snapshot.get("active_states"))
+        # Also search past episodes for episodic recall ("remember when...")
+        episodes = recall_episodes(req.text, speaker_id)
 
     elif decision.action == "STORE_AND_RETRIEVE":
         result = store_and_retrieve(_build_memory_payload(req, emotion))
@@ -106,9 +110,13 @@ def handle_input(req: AgentInput):
         speaker_id=speaker_id,
         scene=req.scene,
         reset_history=bool(_GREETING_RE.match(req.text.strip())),
+        episodes=episodes,
     )
 
-    # ── Step 5: Trigger conversation summarization every N turns ──────────
+    # ── Step 5: Store this turn as an episode (episodic memory) ──────────
+    store_episode(speaker_id, req.text, elara_result.get("reply", ""))
+
+    # ── Step 6: Trigger conversation summarization every N turns ──────────
     last_turns = elara_result.get("last_turns", [])
     maybe_summarize(speaker_id, last_turns)
 

@@ -344,11 +344,39 @@ def maybe_summarize(speaker_id: str, last_turns: list) -> bool:
 
 # ── MEMORY FORMATTING ──────────────────────────────────────────────────────
 
-def _format_memory_context(snapshot: dict) -> str:
-    if not snapshot:
+def store_episode(speaker_id: str, user_turn: str, assistant_turn: str) -> None:
+    """Fire-and-forget: store one turn-pair as an episode in the memory agent."""
+    try:
+        requests.post(
+            f"{settings.memory_agent_url}/episode",
+            json={"speaker_id": speaker_id, "user_turn": user_turn,
+                  "assistant_turn": assistant_turn},
+            timeout=15,
+        )
+    except Exception as e:
+        print(f"[Episode] Store failed (non-fatal): {e}")
+
+
+def recall_episodes(question: str, speaker_id: str, top_k: int = 3) -> list:
+    """Semantic search over past episodes. Returns list of episode dicts."""
+    try:
+        r = requests.post(
+            f"{settings.memory_agent_url}/recall",
+            json={"question": question, "speaker_id": speaker_id, "top_k": top_k},
+            timeout=20,
+        )
+        r.raise_for_status()
+        return r.json().get("episodes", [])
+    except Exception as e:
+        print(f"[Episode] Recall failed (non-fatal): {e}")
+        return []
+
+
+def _format_memory_context(snapshot: dict, episodes: list = None) -> str:
+    if not snapshot and not episodes:
         return ""
     parts = []
-    active = snapshot.get("active_states", [])
+    active = snapshot.get("active_states", []) if snapshot else []
     if active:
         # Group by entity so the LLM can clearly distinguish facts about the user
         # from facts about third parties (son, neighbour, etc.).
@@ -377,9 +405,22 @@ def _format_memory_context(snapshot: dict) -> str:
         if history:
             current = b.get("current_value", history[-1].get("value", ""))
             parts.append(f"Your belief about {b['about']}: {current}")
-    events = [e["event_type"] for e in snapshot.get("recent_events", []) if e.get("event_type")]
+    events = [e["event_type"] for e in snapshot.get("recent_events", []) if e.get("event_type")] if snapshot else []
     if events:
         parts.append("Recent events: " + ", ".join(events))
+
+    if episodes:
+        ep_lines = []
+        for ep in episodes:
+            ts = str(ep.get("timestamp", ""))[:10]
+            u = ep.get("user_turn", "")[:120]
+            a = ep.get("assistant_turn") or ""
+            a = a[:120]
+            ep_lines.append(f'[{ts}] You said: "{u}"')
+            if a:
+                ep_lines.append(f'         Elara replied: "{a}"')
+        parts.append("Past conversations you may remember:\n" + "\n".join(ep_lines))
+
     return "\n".join(parts)
 
 
@@ -421,8 +462,9 @@ def elara_chat(
     speaker_id: str = "user",
     scene: str = None,
     reset_history: bool = False,
+    episodes: list = None,
 ) -> dict:
-    memory_context = _format_memory_context(snapshot)
+    memory_context = _format_memory_context(snapshot, episodes)
     if emotion and emotion.lower() not in ("normal", "neutral", "none", "unknown"):
         prefix = f"Sensor-detected emotion: {emotion}."
         memory_context = f"{prefix}\n{memory_context}" if memory_context else prefix

@@ -3,13 +3,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.database import get_db, check_connection
-from app.models import ProcessRequest, ProcessResponse, RetrieveRequest, MemorySnapshot
+from app.models import (
+    ProcessRequest, ProcessResponse, RetrieveRequest, MemorySnapshot,
+    EpisodeRequest, RecallRequest, RecallResponse, Episode,
+)
 from app.extractor import extract_claims, classify_intent, embed_text
 from app.memory import (
     log_raw, write_state, write_belief, write_event,
-    update_frequency, assemble_snapshot
+    update_frequency, assemble_snapshot,
+    write_episode, get_similar_episodes,
 )
 from app.models import ClaimType
+
+
+_EPISODES_DDL = """
+CREATE TABLE IF NOT EXISTS episodes (
+    id              SERIAL PRIMARY KEY,
+    speaker_id      TEXT NOT NULL DEFAULT 'user',
+    user_turn       TEXT NOT NULL,
+    assistant_turn  TEXT,
+    embedding       VECTOR(768),
+    timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_episodes_speaker   ON episodes(speaker_id);
+CREATE INDEX IF NOT EXISTS idx_episodes_timestamp ON episodes(timestamp DESC);
+"""
 
 
 @asynccontextmanager
@@ -17,8 +35,13 @@ async def lifespan(app: FastAPI):
     try:
         check_connection()
         print("✅ Database connected")
+        # Create episodes table if it didn't exist at init time (existing DBs)
+        with get_db() as db:
+            from sqlalchemy import text as _t
+            db.execute(_t(_EPISODES_DDL))
+        print("✅ Episodes table ready")
     except Exception as e:
-        print(f"❌ Database connection failed: {e}")
+        print(f"❌ Startup error: {e}")
     yield
 
 
@@ -115,6 +138,54 @@ def retrieve(req: RetrieveRequest):
         )
 
     return snapshot
+
+
+# ── EPISODE  (write one turn-pair) ────────────────────────────────────────
+
+@app.post("/episode", status_code=201)
+def store_episode(req: EpisodeRequest):
+    """
+    Called by the orchestrator after every turn.
+    Embeds the full exchange (user + assistant) and stores as one episode.
+    """
+    combined = req.user_turn
+    if req.assistant_turn:
+        combined += "\n" + req.assistant_turn
+    embedding = embed_text(combined)
+    with get_db() as db:
+        write_episode(db, req.speaker_id, req.user_turn, req.assistant_turn, embedding)
+    return {"status": "ok"}
+
+
+# ── RECALL  (semantic search over past episodes) ───────────────────────────
+
+@app.post("/recall", response_model=RecallResponse)
+def recall_episodes(req: RecallRequest):
+    """
+    Semantic search over stored episodes.
+    Returns the top-k most relevant past conversation turns for the question.
+    """
+    query_embedding = embed_text(req.question)
+    with get_db() as db:
+        rows = get_similar_episodes(
+            db,
+            query_embedding=query_embedding,
+            speaker_id=req.speaker_id,
+            top_k=req.top_k,
+        )
+    episodes = [
+        Episode(
+            id=r["id"],
+            speaker_id=r["speaker_id"],
+            user_turn=r["user_turn"],
+            assistant_turn=r["assistant_turn"],
+            timestamp=r["timestamp"],
+            similarity=r["similarity"],
+        )
+        for r in rows
+        if r["similarity"] > 0.5   # only surface genuinely similar episodes
+    ]
+    return RecallResponse(episodes=episodes)
 
 
 # ── HEALTH ─────────────────────────────────────────────────────────────────

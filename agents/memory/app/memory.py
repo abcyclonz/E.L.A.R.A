@@ -213,6 +213,59 @@ def get_recent_events(db: Session, limit: int = 5,
     ) for r in rows]
 
 
+def write_episode(
+    db: Session,
+    speaker_id: str,
+    user_turn: str,
+    assistant_turn: str = None,
+    embedding: list = None,
+) -> None:
+    db.execute(text("""
+        INSERT INTO episodes (speaker_id, user_turn, assistant_turn, embedding)
+        VALUES (:speaker_id, :user_turn, :assistant_turn, :embedding)
+    """), {
+        "speaker_id": speaker_id,
+        "user_turn": user_turn,
+        "assistant_turn": assistant_turn,
+        "embedding": str(embedding) if embedding else None,
+    })
+
+
+def get_similar_episodes(
+    db: Session,
+    query_embedding: list,
+    speaker_id: str = None,
+    top_k: int = 3,
+) -> list:
+    """Return the top-k episodes most similar to the query embedding."""
+    params: dict = {"embedding": str(query_embedding), "top_k": top_k}
+    speaker_filter = "AND speaker_id = :speaker_id" if speaker_id else ""
+    if speaker_id:
+        params["speaker_id"] = speaker_id
+
+    rows = db.execute(text(f"""
+        SELECT id, speaker_id, user_turn, assistant_turn, timestamp,
+               1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
+        FROM episodes
+        WHERE embedding IS NOT NULL
+          {speaker_filter}
+        ORDER BY embedding <=> CAST(:embedding AS vector)
+        LIMIT :top_k
+    """), params).fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "speaker_id": r[1],
+            "user_turn": r[2],
+            "assistant_turn": r[3],
+            "timestamp": r[4],
+            "similarity": float(r[5]),
+        }
+        for r in rows
+    ]
+
+
 def get_last_n_turns(db: Session, n: int = 5) -> List[dict]:
     """Last N conversation turns for context window."""
     rows = db.execute(text("""
