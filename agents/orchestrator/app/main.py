@@ -4,6 +4,7 @@ from app.models import AgentInput, OrchestrationResult
 from app.agents import (
     route, store_and_retrieve, retrieve_only, elara_chat,
     detect_style_frustration, maybe_summarize, run_tool,
+    _GREETING_RE,
 )
 
 
@@ -104,6 +105,7 @@ def handle_input(req: AgentInput):
         emotion=emotion,
         speaker_id=speaker_id,
         scene=req.scene,
+        reset_history=bool(_GREETING_RE.match(req.text.strip())),
     )
 
     # ── Step 5: Trigger conversation summarization every N turns ──────────

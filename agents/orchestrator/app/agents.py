@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import json
+import re
 import requests
 from app.config import settings
 from app.tool_client import call_mcp_tool
@@ -393,12 +394,19 @@ def _clear_stale_history(state: dict) -> dict:
 
 # ── ELARA SESSION STATE ────────────────────────────────────────────────────
 
+_GREETING_RE = re.compile(
+    r"^\s*(hey+|hi+|hello+|howdy|yo|sup|good\s+(morning|afternoon|evening|night))\s*[!.?]?\s*$",
+    re.IGNORECASE,
+)
+
+
 def elara_chat(
     user_text: str,
     snapshot: dict = None,
     emotion: str = None,
     speaker_id: str = "user",
     scene: str = None,
+    reset_history: bool = False,
 ) -> dict:
     memory_context = _format_memory_context(snapshot)
     if emotion and emotion.lower() not in ("normal", "neutral", "none", "unknown"):
@@ -407,7 +415,13 @@ def elara_chat(
 
     session = cache.get_session(speaker_id)
     if session:
-        session = _clear_stale_history(session)
+        if reset_history:
+            session = dict(session)
+            session["history"] = []
+            session["consecutive_distress_turns"] = 0
+            print("[Cache] History reset for greeting")
+        else:
+            session = _clear_stale_history(session)
 
     payload = {
         "message": user_text,
