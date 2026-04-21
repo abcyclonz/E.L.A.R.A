@@ -34,7 +34,9 @@ from conversation_agent.rag import load_persona, build_persona_prompt, retrieve
 from conversation_agent.llm import collect_stream
 
 # ── Token budgets ─────────────────────────────────────────────────────────────
-_PACE_TOKENS: Dict[str, int] = {"slow": 400, "normal": 300, "fast": 100}
+# Kept tight: elderly users benefit from short, clear replies, not walls of text.
+# "slow" pace means speak gently and clearly — not more words.
+_PACE_TOKENS: Dict[str, int] = {"slow": 160, "normal": 100, "fast": 60}
 
 # ── Default ELARA config ──────────────────────────────────────────────────────
 _DEFAULT_CONFIG: Dict[str, Any] = {

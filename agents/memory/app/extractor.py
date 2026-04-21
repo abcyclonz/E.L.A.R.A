@@ -5,6 +5,13 @@ from app.config import settings
 from app.models import ExtractedClaim, ExtractionResult, ClaimType
 from app import embed_cache
 
+# Values that indicate the LLM confused extraction instructions with actual facts.
+# Claims whose value matches this pattern are discarded as garbage.
+_GARBAGE_VALUE = re.compile(
+    r"^(corrects?_?\w*|old_entity|unknown_entity|placeholder|<[^>]+>)$",
+    re.IGNORECASE,
+)
+
 EXTRACTION_PROMPT = """You are a memory extraction engine. Extract structured memory claims from the user's message.
 
 Classify each claim as:
@@ -114,8 +121,12 @@ def extract_claims(text: str, emotion: str = None, scene: str = None) -> Extract
         for c in data.get("claims", []):
             try:
                 claim = ExtractedClaim(**c)
-                if claim.type != ClaimType.IGNORE:
-                    claims.append(claim)
+                if claim.type == ClaimType.IGNORE:
+                    continue
+                if _GARBAGE_VALUE.match(str(claim.value).strip()):
+                    print(f"[Extractor] Rejecting garbage claim (meta-value): {c}")
+                    continue
+                claims.append(claim)
             except Exception as e:
                 print(f"[Extractor] Skipping claim {c}: {e}")
                 continue

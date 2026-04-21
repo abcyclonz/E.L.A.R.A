@@ -12,12 +12,16 @@ Capabilities:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 import json
 import requests
 from app.config import settings
 from app.tool_client import call_mcp_tool
 from app import cache
+
+# Clear conversation history if the last turn is older than this.
+_SESSION_HISTORY_TTL = timedelta(hours=1)
 
 
 # ── TOOL REGISTRY ──────────────────────────────────────────────────────────
@@ -331,17 +335,60 @@ def _format_memory_context(snapshot: dict) -> str:
     parts = []
     active = snapshot.get("active_states", [])
     if active:
-        facts = [f"{s['entity']} {s['attribute']} = {s['value']}" for s in active]
-        parts.append("Current facts: " + ", ".join(facts))
+        # Group by entity so the LLM can clearly distinguish facts about the user
+        # from facts about third parties (son, neighbour, etc.).
+        by_entity: dict[str, list[str]] = {}
+        for s in active:
+            entity = s["entity"]
+            fact = f"{s['attribute']} = {s['value']}"
+            by_entity.setdefault(entity, []).append(fact)
+
+        for entity, facts in sorted(by_entity.items()):
+            if entity == "user":
+                label = "About you"
+            elif entity in ("son", "daughter"):
+                name = next(
+                    (s["value"] for s in active
+                     if s["entity"] == entity and s["attribute"] == "name"),
+                    None,
+                )
+                label = f"About your {entity} ({name})" if name else f"About your {entity}"
+            else:
+                label = f"About your {entity}"
+            parts.append(f"{label}: {', '.join(facts)}")
+
     for b in snapshot.get("relevant_beliefs", []):
         history = b.get("history", [])
         if history:
             current = b.get("current_value", history[-1].get("value", ""))
-            parts.append(f"User's belief about {b['about']}: {current}")
+            parts.append(f"Your belief about {b['about']}: {current}")
     events = [e["event_type"] for e in snapshot.get("recent_events", []) if e.get("event_type")]
     if events:
         parts.append("Recent events: " + ", ".join(events))
     return "\n".join(parts)
+
+
+def _clear_stale_history(state: dict) -> dict:
+    """Reset conversation history if the session has been idle for > SESSION_HISTORY_TTL.
+
+    Bandit matrices and config are preserved — only history is cleared.
+    """
+    history = state.get("history", [])
+    if not history:
+        return state
+    last_ts = history[-1].get("timestamp")
+    if not last_ts:
+        return state
+    try:
+        last_time = datetime.fromisoformat(last_ts)
+        if datetime.now(timezone.utc) - last_time > _SESSION_HISTORY_TTL:
+            state = dict(state)
+            state["history"] = []
+            state["consecutive_distress_turns"] = 0
+            print("[Cache] Stale session history cleared — fresh conversation context")
+    except Exception:
+        pass
+    return state
 
 
 # ── ELARA SESSION STATE ────────────────────────────────────────────────────
@@ -358,9 +405,13 @@ def elara_chat(
         prefix = f"Sensor-detected emotion: {emotion}."
         memory_context = f"{prefix}\n{memory_context}" if memory_context else prefix
 
+    session = cache.get_session(speaker_id)
+    if session:
+        session = _clear_stale_history(session)
+
     payload = {
         "message": user_text,
-        "state": cache.get_session(speaker_id),
+        "state": session,
         "backend": "ollama",
         "memory_context": memory_context or None,
     }
