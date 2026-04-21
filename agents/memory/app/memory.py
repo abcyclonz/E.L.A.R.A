@@ -107,15 +107,44 @@ def update_frequency(db: Session, topic: str):
 
 # ── READ PATH ──────────────────────────────────────────────────────────────
 
-def get_active_states(db: Session, top_n: int = 20) -> List[ActiveState]:
-    """O(1) indexed lookup of current truth. ~2ms."""
-    rows = db.execute(text("""
-        SELECT entity, attribute, value, confidence, emotion, valid_from
-        FROM state_memory
-        WHERE valid_to IS NULL
-        ORDER BY valid_from DESC
-        LIMIT :top_n
-    """), {"top_n": top_n}).fetchall()
+def get_active_states(
+    db: Session,
+    top_n: int = 20,
+    entities: List[str] = None,
+) -> List[ActiveState]:
+    """O(1) indexed lookup of current truth. ~2ms.
+
+    Pass `entities` to restrict results to specific entity names (e.g. ["son", "user"]).
+    This keeps Elara's context focused rather than dumping every stored fact.
+    """
+    # Filter out known garbage entities that the extractor sometimes produces
+    _JUNK_ENTITIES = {"assistant", "him", "he", "she", "they", "it"}
+
+    if entities:
+        safe = [e for e in entities if e not in _JUNK_ENTITIES]
+        if safe:
+            placeholders = ", ".join(f":e{i}" for i in range(len(safe)))
+            params = {f"e{i}": e for i, e in enumerate(safe)}
+            params["top_n"] = top_n
+            rows = db.execute(text(f"""
+                SELECT entity, attribute, value, confidence, emotion, valid_from
+                FROM state_memory
+                WHERE valid_to IS NULL
+                  AND LOWER(entity) IN ({placeholders})
+                ORDER BY valid_from DESC
+                LIMIT :top_n
+            """), params).fetchall()
+        else:
+            rows = []
+    else:
+        rows = db.execute(text("""
+            SELECT entity, attribute, value, confidence, emotion, valid_from
+            FROM state_memory
+            WHERE valid_to IS NULL
+              AND LOWER(entity) NOT IN ('assistant', 'him', 'he', 'she', 'they', 'it')
+            ORDER BY valid_from DESC
+            LIMIT :top_n
+        """), {"top_n": top_n}).fetchall()
 
     return [ActiveState(
         entity=r[0], attribute=r[1], value=r[2],
@@ -198,6 +227,19 @@ def get_last_n_turns(db: Session, n: int = 5) -> List[dict]:
             for r in reversed(rows)]
 
 
+# Entities the system tracks; used to filter active_states to what's relevant.
+_KNOWN_ENTITIES = {"user", "son", "daughter", "neighbour", "neighbor", "wife", "husband",
+                   "friend", "brother", "sister", "mother", "father", "doctor", "caregiver"}
+
+
+def _entities_from_question(question: str) -> List[str]:
+    """Return entity names mentioned in the question so we only fetch relevant states."""
+    if not question:
+        return []
+    q = question.lower()
+    return [e for e in _KNOWN_ENTITIES if e in q]
+
+
 def assemble_snapshot(db: Session, intent: str,
                       question: str = None,
                       query_embedding: list = None) -> MemorySnapshot:
@@ -205,7 +247,13 @@ def assemble_snapshot(db: Session, intent: str,
     Assemble the clean resolved snapshot.
     The LLM never queries memory — it only sees this.
     """
-    active_states = get_active_states(db)
+    # For focused queries, restrict to entities mentioned in the question so we
+    # don't flood Elara's context with unrelated facts.
+    focused_entities = _entities_from_question(question)
+    active_states = get_active_states(
+        db,
+        entities=focused_entities if focused_entities else None,
+    )
     last_5 = get_last_n_turns(db)
 
     # Branch based on intent

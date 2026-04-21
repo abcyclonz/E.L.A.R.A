@@ -172,3 +172,28 @@ def debug_logs(limit: int = 20):
         return [{"speaker": r[0], "text": r[1], "emotion": r[2],
                  "scene": r[3], "timestamp": r[4].isoformat()}
                 for r in rows]
+
+
+@app.delete("/debug/states/purge")
+def debug_purge_states():
+    """
+    Delete all active states that have garbage or meta values.
+    Call this to clean up bad data written by the extractor before the garbage filter was added.
+    """
+    _GARBAGE_ENTITIES = ("assistant", "him", "he", "she", "they", "it")
+    _GARBAGE_VALUE_PATTERN = "%(corrects%"
+    with get_db() as db:
+        from sqlalchemy import text
+        result = db.execute(text("""
+            DELETE FROM state_memory
+            WHERE valid_to IS NULL
+              AND (
+                LOWER(entity) = ANY(:junk_entities)
+                OR value ILIKE :garbage_val
+              )
+        """), {
+            "junk_entities": list(_GARBAGE_ENTITIES),
+            "garbage_val": _GARBAGE_VALUE_PATTERN,
+        })
+        db.commit()
+        return {"deleted": result.rowcount}

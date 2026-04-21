@@ -84,32 +84,46 @@ def extract_tool_params(tool_name: str, user_text: str) -> dict:
 _TOOLS_LIST = "\n".join(f"  - {k}: {v}" for k, v in TOOL_REGISTRY.items())
 
 ROUTER_PROMPT = f"""You are a routing agent for a personal AI companion system.
-Analyze the user's message and decide the best action.
+Analyze the user's message and choose ONE action.
+
+CRITICAL RULE: STORE_MEMORY is ONLY for declarative statements where the user is telling you
+something about themselves. NEVER use STORE_MEMORY for questions of any kind.
 
 ACTIONS:
-- STORE_MEMORY: User is sharing personal facts, relationships, feelings, experiences, OR preferences about how they want to be spoken to.
-  Examples: "I hate my neighbour", "my son plays guitar", "I got a promotion", "I feel anxious",
-            "don't talk to me in long sentences", "please keep replies short"
 
-- RETRIEVE_MEMORY: User is asking about something from past conversations or needs recalled context.
-  Examples: "do you remember what I said?", "what did I tell you about my neighbour?", "how was I feeling?"
+STORE_MEMORY — user is asserting/stating personal facts, relationships, feelings, or preferences.
+  Must be a statement, NOT a question.
+  YES: "I hate my neighbour", "my son plays guitar", "I got a promotion", "I live in Kerala",
+       "please keep replies short", "my name is John", "I feel anxious"
+  NO:  "do you know X?", "what is X?", "search X", "can you find X"
 
-- STORE_AND_RETRIEVE: User is correcting or updating something that has prior context.
-  Examples: "my neighbour is now good with me", "actually it was my son not my neighbour", "things have changed"
+RETRIEVE_MEMORY — user is asking whether you remember personal details they previously shared.
+  Only for questions about THEIR OWN personal history, NOT general world knowledge.
+  YES: "do you know my son's name?", "do you remember what I told you?",
+       "what do you know about my neighbour?", "do you remember my family?"
+  NO:  "do you know the capital of France", "what are the states of Kerala"
 
-- USE_TOOL: User wants to perform an action or get external information that requires a tool.
+STORE_AND_RETRIEVE — user is correcting or updating previously stored personal information.
+  YES: "actually my neighbour is fine now", "it was my son not my neighbour", "I moved to Mumbai"
+
+USE_TOOL — use for ALL of these:
+  (a) Questions about world facts, geography, science, history, news, weather, or current events
+  (b) Explicit search requests: "search it", "search that", "look it up", "find out", "search [topic]"
+  (c) Reminders and calendar requests
   Available tools:
 {_TOOLS_LIST}
-  Examples: "remind me to take my medicine at 8pm", "what's the weather today", "schedule a doctor appointment"
-  Format for this action: USE_TOOL | tool_name | reason
+  YES: "what are the districts of Kerala?", "search it", "search Kerala",
+       "remind me to take medicine at 8pm", "what's the weather today",
+       "how many states does India have", "who is the prime minister", "look that up"
+  Format: USE_TOOL | tool_name | reason
 
-- DIRECT_CHAT: Pure greetings, small talk, or questions needing no memory and no tools.
-  Examples: "hey", "how are you", "tell me a joke", "ok", "thanks"
+DIRECT_CHAT — greetings, small talk, questions TO ELARA, or simple replies that need nothing else.
+  YES: "hey", "how are you", "tell me a joke", "ok", "thanks", "what's your name", "that's nice"
 
 User message: "{{text}}"
 Detected emotion: {{emotion}}
 
-Output exactly ONE line. Replace the placeholders with real values:
+Output exactly ONE line:
 STORE_MEMORY | <why>
 RETRIEVE_MEMORY | <why>
 STORE_AND_RETRIEVE | <why>
