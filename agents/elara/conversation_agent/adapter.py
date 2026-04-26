@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 # ── Conversation Agent imports (unchanged files) ──────────────────────────────
 from conversation_agent.rag import load_persona, build_persona_prompt, retrieve
 from conversation_agent.llm import collect_stream
+from conversation_agent.notifier import send_caregiver_alert
 
 # ── Token budgets ─────────────────────────────────────────────────────────────
 # Kept tight: elderly users benefit from short, clear replies, not walls of text.
@@ -100,6 +101,8 @@ class SessionState(BaseModel):
 
     # FIX #2: track consecutive non-calm turns for the distress watchdog
     consecutive_distress_turns: int = 0
+    # Prevent duplicate emails within the same distress episode; resets when calm returns
+    caregiver_alerted: bool = False
 
 
 class ChatRequest(BaseModel):
@@ -216,6 +219,7 @@ class ConversationAdapter:
         caregiver_alert = False
         if la_resp.inferred_state.affect == "calm":
             state.consecutive_distress_turns = 0
+            state.caregiver_alerted = False  # new episode can trigger alert again
         else:
             state.consecutive_distress_turns += 1
 
@@ -230,6 +234,15 @@ class ConversationAdapter:
         # ── 7. Build system prompt ────────────────────────────────────────
         config_dict   = state.config.model_dump()
         system_prompt = build_persona_prompt(_PERSONA, req.message, config_dict, req.memory_context)
+
+        # After the first exchange, inject a hard reminder to skip greetings.
+        # Placed at the END of the system prompt so it's the most recent context.
+        has_prior_reply = any(t.role == "assistant" for t in state.history)
+        if has_prior_reply:
+            system_prompt += (
+                "\n\n[IMPORTANT] Do NOT start this reply with 'Hello', 'Hi', or any greeting. "
+                "The conversation is already in progress. Respond directly."
+            )
 
         # ── 8. Build LLM message list ─────────────────────────────────────
         messages = [{"role": "system", "content": system_prompt}]
@@ -250,6 +263,17 @@ class ConversationAdapter:
         except Exception as exc:
             log.error("LLM call failed: %s", exc)
             reply = "I'm sorry, I'm having a little trouble thinking right now. Please try again."
+
+        # Strip spurious greeting from the start of replies after the first turn.
+        # Mistral consistently prepends "Hello [Name]," even when instructed not to.
+        # Strip whitespace first: the LLM often emits a leading space before "Hello".
+        if has_prior_reply and reply:
+            import re as _re
+            reply = _re.sub(
+                r"^(Hello|Hi|Hey)\b[,!\s]+(?:[A-Z][a-z]+(?: [A-Z][a-z]+)*[,!\s]+)?",
+                "",
+                reply.strip(),
+            ).strip()
 
         # ── 10. Append assistant reply to history & trim ──────────────────
         state.history.append(
@@ -281,18 +305,14 @@ class ConversationAdapter:
     def _check_distress_watchdog(state: SessionState) -> bool:
         """
         If the user has been non-calm for DISTRESS_TURN_LIMIT consecutive turns,
-        log a caregiver alert and return True.
-
-        TO ADD REAL ALERTS: Replace the log.warning line below with your
-        notification call — e.g. send_sms(), push_notification(), email_caregiver().
+        fire a caregiver alert (email via SendGrid) and return True.
+        The alert fires once per distress episode; caregiver_alerted resets when
+        the user returns to calm.
         """
         if state.consecutive_distress_turns >= DISTRESS_TURN_LIMIT:
-            log.warning(
-                "[CAREGIVER ALERT] Session %s — user has been distressed for %d "
-                "consecutive turns. Consider contacting a caregiver.",
-                state.session_id,
-                state.consecutive_distress_turns,
-            )
+            if not state.caregiver_alerted:
+                send_caregiver_alert(state.session_id, state.consecutive_distress_turns)
+                state.caregiver_alerted = True
             return True
         return False
 

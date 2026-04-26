@@ -225,17 +225,19 @@ def apply_escalation_rules(
     all_signals_fired: bool,
 ) -> Tuple[str, float, Optional[str]]:
 
+    # ── R4: disengaged after all-calm history → brevity, not disengagement ──
+    # Must run BEFORE the empty-window early-return so that first-turn greetings
+    # (empty window) are never classified as disengaged.
+    if raw_affect == "disengaged":
+        if not affect_window or all(a == "calm" for a in affect_window[-WINDOW_SIZE:]):
+            return "calm", raw_conf * 0.9, "R4_calm_history_not_disengaged"
+        return raw_affect, raw_conf, None
+
+    # All frustrated rules require a non-empty history window.
     if not affect_window:
         return raw_affect, raw_conf, None
 
     window = affect_window[-WINDOW_SIZE:]
-
-    # ── R4: disengaged after all-calm history → brevity, not disengagement ──
-    # Also fires when window is empty (first turns) — greetings are not disengagement.
-    if raw_affect == "disengaged":
-        if not affect_window or all(a == "calm" for a in window):
-            return "calm", raw_conf * 0.9, "R4_calm_history_not_disengaged"
-        return raw_affect, raw_conf, None
 
     # ── Frustrated rules ────────────────────────────────────────────────────
     if raw_affect != "frustrated":

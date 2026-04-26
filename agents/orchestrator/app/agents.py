@@ -175,8 +175,8 @@ def route(text: str, emotion: str = None) -> RouteDecision:
             reason = parts[1] if len(parts) > 1 else ""
             return RouteDecision(action, reason)
 
-        print(f"[Router] No valid action found in response, defaulting to STORE_MEMORY")
-        return RouteDecision("STORE_MEMORY", "router fallback")
+        print(f"[Router] No valid action found in response, defaulting to DIRECT_CHAT")
+        return RouteDecision("DIRECT_CHAT", "router fallback")
 
     except Exception as e:
         print(f"[Router] Failed: {e}")
@@ -265,12 +265,12 @@ def store_and_retrieve(payload: dict) -> dict:
         return {"status": "error", "snapshot": None, "claims_extracted": 0}
 
 
-def retrieve_only(question: str) -> dict:
+def retrieve_only(question: str, speaker_id: str = "user") -> dict:
     """Retrieve with query rewriting for better results."""
     search_query = rewrite_query(question)
     try:
         r = requests.post(f"{settings.memory_agent_url}/retrieve",
-                          json={"question": search_query}, timeout=30)
+                          json={"question": search_query, "speaker_id": speaker_id}, timeout=30)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -454,6 +454,14 @@ _GREETING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Short affirmations that should always be DIRECT_CHAT — never worth touching memory.
+_AFFIRMATION_RE = re.compile(
+    r"^\s*(ok|okay|yes|yeah|yep|yup|sure|alright|right|got it|gotcha|"
+    r"no|nope|nah|fine|great|good|nice|cool|perfect|thanks|thank you|cheers|"
+    r"uh huh|mm+|hmm+)\s*[!.?]?\s*$",
+    re.IGNORECASE,
+)
+
 
 def elara_chat(
     user_text: str,
@@ -475,7 +483,13 @@ def elara_chat(
             session = dict(session)
             session["history"] = []
             session["consecutive_distress_turns"] = 0
-            print("[Cache] History reset for greeting")
+            # Also clear affect_window so old emotion history doesn't bleed into new sessions
+            if isinstance(session.get("bandit"), dict):
+                session["bandit"] = dict(session["bandit"])
+                session["bandit"]["affect_window"] = []
+                session["bandit"]["previous_affect"] = None
+                session["bandit"]["previous_action_id"] = None
+            print("[Cache] History + affect_window reset for greeting")
         else:
             session = _clear_stale_history(session)
 

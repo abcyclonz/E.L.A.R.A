@@ -1,12 +1,19 @@
-from fastapi import FastAPI
+import re
+import httpx
+import requests as _requests
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
 from app.models import AgentInput, OrchestrationResult
 from app.agents import (
     route, store_and_retrieve, retrieve_only, elara_chat,
     detect_style_frustration, maybe_summarize, run_tool,
     store_episode, recall_episodes,
-    _GREETING_RE,
+    _GREETING_RE, _AFFIRMATION_RE,
 )
+from app import auth
+from app.config import settings
 
 
 app = FastAPI(
@@ -21,6 +28,198 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup_event():
+    auth.init_auth_db()
+
+
+# ---------------------------------------------------------------------------
+# Auth request/response models
+# ---------------------------------------------------------------------------
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str = ""
+    age: str = ""
+    preferred_language: str = ""
+    background: str = ""
+    interests: list = []
+    conversation_preferences: list = []
+    technology_usage: str = ""
+    conversation_goals: list = []
+    additional_info: str = ""
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class ChatRequest(BaseModel):
+    session_id: str          # == user_id from auth
+    user_input: str
+    user_token: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _seed_profile_into_memory(user_id: str, req: "SignupRequest") -> None:
+    """Store the signup profile as memory facts so Elara knows who the user is."""
+    parts = []
+    if req.full_name:
+        parts.append(f"My name is {req.full_name}.")
+    if req.age:
+        parts.append(f"I am {req.age} years old.")
+    if req.preferred_language:
+        parts.append(f"I prefer to speak in {req.preferred_language}.")
+    if req.background:
+        parts.append(f"About my background: {req.background}.")
+    if req.interests:
+        parts.append(f"My interests include: {', '.join(req.interests)}.")
+    if req.technology_usage:
+        parts.append(f"My technology usage: {req.technology_usage}.")
+    if req.conversation_goals:
+        parts.append(f"My conversation goals: {', '.join(req.conversation_goals)}.")
+    if req.additional_info:
+        parts.append(req.additional_info)
+
+    if not parts:
+        return
+
+    profile_text = " ".join(parts)
+    try:
+        _requests.post(
+            f"{settings.memory_agent_url}/process",
+            json={"text": profile_text, "speaker": user_id,
+                  "metadata": {"source": "signup_profile"}},
+            timeout=30,
+        )
+        print(f"[Auth] Seeded profile for {user_id}: {profile_text[:80]}...")
+    except Exception as e:
+        print(f"[Auth] Profile seed failed (non-fatal): {e}")
+
+
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/signup")
+def signup_endpoint(req: SignupRequest):
+    try:
+        result = auth.signup(
+            email=req.email,
+            password=req.password,
+            full_name=req.full_name,
+            age=req.age,
+            preferred_language=req.preferred_language,
+            background=req.background,
+            interests=req.interests,
+            conversation_preferences=req.conversation_preferences,
+            technology_usage=req.technology_usage,
+            conversation_goals=req.conversation_goals,
+            additional_info=req.additional_info,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    user = auth.get_user(result["user_id"])
+    _seed_profile_into_memory(result["user_id"], req)
+    return {"user": user, "access_token": result["token"]}
+
+
+@app.post("/auth/login")
+def login_endpoint(req: LoginRequest):
+    try:
+        result = auth.login(req.email, req.password)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    return {"user": result["row"], "access_token": result["token"]}
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoint (auth-gated wrapper around existing pipeline)
+# ---------------------------------------------------------------------------
+
+@app.post("/chat")
+def chat_endpoint(req: ChatRequest):
+    # Verify token
+    user_id = auth.verify_token(req.user_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Use the session_id (== user UUID) as the speaker_id so memories are namespaced per user
+    speaker_id = req.session_id
+
+    # Run through the full existing pipeline (mirrors handle_input logic)
+    agent_input = AgentInput(
+        text=req.user_input,
+        speaker=speaker_id,
+        emotion=None,
+        scene=None,
+    )
+    result = handle_input(agent_input)
+
+    return {
+        "ai_response": result.reply,
+        "session_id": speaker_id,
+        "turn_count": 0,  # turn count is tracked per-speaker inside cache
+        "current_router_decision": result.debug.get("router_action", "") if result.debug else "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Profile & Memory endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/get_profile/{user_id}")
+def get_profile(user_id: str):
+    user = auth.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user_persona": user}
+
+
+@app.get("/get_memories/{user_id}")
+def get_memories(user_id: str):
+    """
+    Fetch memories for a user from the memory agent.
+    Returns {facts: [...], summaries: [...]}.
+    """
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(
+                f"{settings.memory_agent_url}/retrieve",
+                json={"question": f"all facts and memories for {user_id}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        print(f"[get_memories] Failed to reach memory agent: {e}")
+        return {"facts": [], "summaries": []}
+
+    # Format active_states as flat fact strings
+    active_states = data.get("active_states", [])
+    facts = [
+        {
+            "document": f"{s.get('entity', '')} — {s.get('attribute', '')}: {s.get('value', '')}",
+            **s,
+        }
+        for s in active_states
+    ]
+
+    # Pull summaries from recent_events if present
+    recent_events = data.get("recent_events", [])
+    summaries = [
+        {"document": e.get("event_type", str(e))} for e in recent_events
+    ]
+
+    return {"facts": facts, "summaries": summaries}
 
 
 @app.post("/input", response_model=OrchestrationResult)
@@ -43,8 +242,6 @@ def handle_input(req: AgentInput):
     speaker_id       = req.speaker or "user"
 
     # ── Step 1: Implicit style frustration check ───────────────────────────
-    # If the user didn't send an explicit emotion, check for frustration signals.
-    # If detected, inject "frustrated" so Elara and the router both see it.
     emotion = req.emotion
     if not emotion or emotion.lower() in ("none", "normal", "neutral", "unknown"):
         if detect_style_frustration(req.text):
@@ -52,7 +249,32 @@ def handle_input(req: AgentInput):
             print("[Orchestrator] Style frustration injected → emotion=frustrated")
 
     # ── Step 2: LLM router decides the action ─────────────────────────────
-    decision = route(req.text, emotion)
+    from app.agents import RouteDecision
+    text_lower = req.text.strip().lower()
+
+    # Gratitude affirmations ("thanks", "thank you", "cheers") → simple canned reply.
+    # Mistral reliably fails these by narrating its own system prompt instead.
+    _GRATITUDE_RE = re.compile(
+        r"^\s*(thanks|thank you|thank u|cheers|ta)\s*[!.?]?\s*$", re.IGNORECASE
+    )
+    if _GRATITUDE_RE.match(req.text.strip()):
+        elara_result = elara_chat(
+            user_text=req.text, snapshot=None, emotion=emotion,
+            speaker_id=speaker_id, scene=req.scene, reset_history=False,
+        )
+        return OrchestrationResult(
+            reply="You're welcome! Is there anything else I can help you with?",
+            memory_used=False, memory_stored=False,
+            affect=elara_result["affect"], caregiver_alert=elara_result["caregiver_alert"],
+            debug={"router_action": "DIRECT_CHAT", "router_reason": "gratitude affirmation"},
+        )
+
+    # Short-circuit for other single-word affirmations: always DIRECT_CHAT, no memory.
+    if _AFFIRMATION_RE.match(req.text.strip()):
+        decision = RouteDecision("DIRECT_CHAT", "short affirmation")
+        print("[Orchestrator] Affirmation short-circuit → DIRECT_CHAT")
+    else:
+        decision = route(req.text, emotion)
     print(f"[Orchestrator] Route → {decision.action} | {decision.reason}")
 
     # ── Step 3: Execute the routed action ─────────────────────────────────
@@ -65,7 +287,7 @@ def handle_input(req: AgentInput):
         memory_used = True
 
     elif decision.action == "RETRIEVE_MEMORY":
-        snapshot = retrieve_only(req.text)
+        snapshot = retrieve_only(req.text, speaker_id=speaker_id)
         memory_used = bool(snapshot and snapshot.get("active_states"))
         # Also search past episodes for episodic recall ("remember when...")
         episodes = recall_episodes(req.text, speaker_id)
