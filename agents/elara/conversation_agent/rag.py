@@ -1,18 +1,18 @@
 """
 Persona prompt builder for ELARA.
 
-User-specific facts come entirely from the memory agent (injected as
-memory_context). This file only defines ELARA's personality and how to
-format the system prompt.
+User-specific facts come from the memory agent (injected as memory_context).
+Conversation style is driven by PersonalityVector → style directive block.
 """
 
 import json
 from pathlib import Path
+from typing import Optional
 
 PERSONA_FILE = Path(__file__).parent / "persona.json"
 
 
-def load_persona(path: str | Path = PERSONA_FILE) -> dict:
+def load_persona(path=PERSONA_FILE) -> dict:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -48,70 +48,136 @@ def build_persona_prompt(
     persona: dict,
     user_message: str,
     elara_config: dict,
-    memory_context: str = None,
+    memory_context: Optional[str] = None,
+    personality=None,
 ) -> str:
     """
-    Build the full system prompt combining ELARA's personality,
-    long-term memory from the memory agent, and current config settings.
-    """
-    personality = "\n".join(f"- {p}" for p in persona.get("personality", []))
-    base = BASE_ELARA_PROMPT.format(personality=personality)
+    Build the full system prompt.
 
-    # Inject long-term memory as the source of truth for user facts
+    personality: PersonalityVector (preferred) or None.
+    elara_config: legacy dict with pace/clarity_level/etc (still used as fallback).
+    """
+    personality_desc = "\n".join(f"- {p}" for p in persona.get("personality", []))
+    base = BASE_ELARA_PROMPT.format(personality=personality_desc)
+
     if memory_context:
         base += f"\n\nWhat you know about this user (from memory):\n{memory_context}"
     else:
         base += "\n\nYou don't have any stored memories about this user yet. Learn from the conversation."
 
-    # Config-driven behaviour adjustments
-    clarity   = elara_config.get("clarity_level", 2)
-    patience  = elara_config.get("patience_mode", False)
-    confirm   = elara_config.get("confirmation_frequency", "low")
-    pace      = elara_config.get("pace", "normal")
+    # ── Style directive from PersonalityVector ────────────────────────────────
+    if personality is not None:
+        base += "\n\n" + _build_style_directive(personality)
+    else:
+        base += "\n\n" + _build_legacy_style(elara_config)
 
+    return base.strip()
+
+
+def _build_style_directive(p) -> str:
+    """Convert PersonalityVector into a natural-language style instruction block."""
     notes = []
-    clarity_note = {
-        1: "Use very simple, short sentences.",
-        2: "Use clear, gentle language.",
-        3: "You can be conversational and detailed.",
-    }.get(clarity, "")
-    if clarity_note:
-        notes.append(clarity_note)
 
-    pace_note = {
-        "slow": "Speak slowly and gently. One thought at a time.",
-        "fast": "Be brief and to the point.",
-    }.get(pace, "")
-    if pace_note:
-        notes.append(pace_note)
+    # Warmth
+    if p.warmth > 0.75:
+        notes.append("Be especially warm, empathetic, and emotionally supportive.")
+    elif p.warmth < 0.35:
+        notes.append("Keep a neutral, matter-of-fact tone.")
+
+    # Humor
+    if p.humor > 0.65:
+        notes.append("Feel free to be playful and use light humour where appropriate.")
+    elif p.humor < 0.20:
+        notes.append("Avoid jokes and humour entirely — keep replies sincere and serious.")
+
+    # Playfulness / maturity
+    if p.playfulness > 0.65:
+        notes.append("Use a whimsical, childlike tone — wonder, imagination, simple joys.")
+    elif p.playfulness < 0.25:
+        notes.append("Keep a mature, composed tone — no silliness or whimsy.")
+
+    # Formality
+    if p.formality > 0.65:
+        notes.append("Use a formal, respectful register (e.g. 'Good afternoon', 'certainly').")
+    elif p.formality < 0.30:
+        notes.append("Keep it casual and friendly (e.g. 'hey', 'sure', 'yep').")
+
+    # Clarity / language complexity
+    if p.clarity > 0.75:
+        notes.append("Use very simple, short words. Avoid complex vocabulary.")
+    elif p.clarity < 0.40:
+        notes.append("You can use a richer vocabulary and more nuanced phrasing.")
+
+    # Verbosity
+    if p.verbosity < 0.30:
+        notes.append("Be very concise — one or two short sentences maximum.")
+    elif p.verbosity > 0.70:
+        notes.append("Be elaborative and thorough — the user enjoys detail.")
+
+    # Pace
+    if p.pace < 0.35:
+        notes.append("Speak slowly and gently. One thought at a time.")
+    elif p.pace > 0.65:
+        notes.append("Be brief and get to the point quickly.")
+
+    # Patience
+    if p.patience > 0.70:
+        notes.append("Open with a warm acknowledgement of how the user is feeling. Repeat key points if needed.")
+    if p.patience > 0.80:
+        notes.append("Briefly repeat back what you understood before responding.")
+
+    # Assertiveness
+    if p.assertiveness > 0.65:
+        notes.append("Be direct and confident in your suggestions.")
+    elif p.assertiveness < 0.25:
+        notes.append("Offer suggestions gently — never push or insist.")
+
+    if not notes:
+        return ""
+    return "[Style]\n" + "\n".join(notes)
+
+
+def _build_legacy_style(elara_config: dict) -> str:
+    """Fallback style notes from the old 4-field config dict."""
+    notes = []
+    clarity  = elara_config.get("clarity_level", 2)
+    patience = elara_config.get("patience_mode", False)
+    confirm  = elara_config.get("confirmation_frequency", "low")
+    pace     = elara_config.get("pace", "normal")
+
+    note = {1: "Use very simple, short sentences.", 2: "Use clear, gentle language.",
+            3: "You can be conversational and detailed."}.get(clarity, "")
+    if note:
+        notes.append(note)
+
+    note = {"slow": "Speak slowly and gently. One thought at a time.",
+            "fast": "Be brief and to the point."}.get(pace, "")
+    if note:
+        notes.append(note)
 
     if patience:
         notes.append("Open with a warm, empathetic acknowledgement of how the user is feeling.")
     if confirm == "high":
         notes.append("Briefly repeat back what you understood before responding.")
 
-    if notes:
-        base += "\n\n" + "\n".join(notes)
-
-    return base.strip()
+    return "\n".join(notes)
 
 
-# Keep retrieve() as a no-op stub so imports in app.py don't break
-def retrieve(user_message: str, persona: dict, top_n: int = 3) -> list[str]:
+def retrieve(user_message: str, persona: dict, top_n: int = 3) -> list:
     return []
 
 
 class ConversationCache:
     def __init__(self, max_turns: int = 10):
         self.max_turns = max_turns
-        self._history: list[dict] = []
+        self._history: list = []
 
     def add(self, role: str, content: str) -> None:
         self._history.append({"role": role, "content": content})
         if len(self._history) > self.max_turns * 2:
             self._history = self._history[-(self.max_turns * 2):]
 
-    def get_messages(self) -> list[dict]:
+    def get_messages(self) -> list:
         return list(self._history)
 
     def turn_count(self) -> int:

@@ -1,21 +1,17 @@
 """
 conversation_agent/adapter.py
-==============================
 
-CHANGES (audit fixes):
-  - FIX #2 (Critical): Distress watchdog.
-    A rolling counter tracks consecutive non-calm turns. When it hits
-    DISTRESS_TURN_LIMIT the system logs a caregiver alert. Easy to wire
-    up to an email/SMS/push notification — just replace the log.warning
-    call in _check_distress_watchdog() with your alert function.
+Stateless conversation turn handler. Bridges the Learning Agent pipeline
+(NLP signals, affect classification, LinUCB bandit, personality update)
+with the LLM reply generation.
 
-  - FIX #3 (High): Immediate positive reward signal.
-    If the user's message contains an explicit "thank you / that helped"
-    phrase, a +1.0 reward is injected directly into the bandit for the
-    previous action — without waiting for next-turn affect to improve.
-    This teaches ELARA what actually worked, not just that things got better.
-
-No other logic is changed. All original comments are preserved.
+Key changes from v1:
+  - SessionState now carries a PersonalityVector (9D continuous style params)
+    that the bandit learns and the prompt builder consumes.
+  - NLPSignals replaces the old 4-tuple; personality_hints from the LLM
+    are used to directly nudge the vector (supervised signal on top of bandit).
+  - Style directive is injected into the system prompt from PersonalityVector.
+  - ElaraConfig is kept for backward compat but is now derived from personality.
 """
 
 from __future__ import annotations
@@ -29,17 +25,13 @@ from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 
-# ── Conversation Agent imports (unchanged files) ──────────────────────────────
 from conversation_agent.rag import load_persona, build_persona_prompt, retrieve
 from conversation_agent.llm import collect_stream
 from conversation_agent.notifier import send_caregiver_alert
+from learning_agent.personality import PersonalityVector, DIMS
 
-# ── Token budgets ─────────────────────────────────────────────────────────────
-# Kept tight: elderly users benefit from short, clear replies, not walls of text.
-# "slow" pace means speak gently and clearly — not more words.
 _PACE_TOKENS: Dict[str, int] = {"slow": 160, "normal": 100, "fast": 60}
 
-# ── Default ELARA config ──────────────────────────────────────────────────────
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "pace": "normal",
     "clarity_level": 2,
@@ -47,15 +39,11 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "patience_mode": False,
 }
 
-# Load persona once at module import
-_PERSONA: Dict[str, Any] = load_persona()
+_PERSONA = load_persona()
 
-# ── FIX #2: Distress watchdog settings ───────────────────────────────────────
-# How many consecutive non-calm turns before we alert a caregiver.
 DISTRESS_TURN_LIMIT = 7
 
-# ── FIX #3: Positive feedback phrases ────────────────────────────────────────
-# If the user says any of these, inject an immediate +1.0 reward.
+# Fast pre-pipeline check for immediate reward (explicit thanks)
 _POSITIVE_FEEDBACK_PATTERNS = re.compile(
     r"\b("
     r"thank you|thanks|that('s| is) (helpful|great|lovely|nice|perfect|clear)|"
@@ -65,8 +53,10 @@ _POSITIVE_FEEDBACK_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# Immediate reward value for explicit positive feedback
 _IMMEDIATE_POSITIVE_REWARD = 1.0
+
+# Step size for applying personality hints directly (supervised nudge)
+_HINT_STEP = 0.08
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -85,52 +75,50 @@ class ElaraConfig(BaseModel):
 
 
 class BanditState(BaseModel):
-    previous_affect: Optional[str] = None
-    previous_action_id: Optional[int] = None
-    previous_context_id: Optional[int] = None
-    previous_config: Optional[ElaraConfig] = None
-    affect_window: List[str] = Field(default_factory=list)
+    previous_affect:     Optional[str]        = None
+    previous_action_id:  Optional[int]        = None
+    previous_context_id: Optional[int]        = None
+    previous_config:     Optional[ElaraConfig] = None
+    affect_window:       List[str]             = Field(default_factory=list)
 
 
 class SessionState(BaseModel):
-    session_id: str
+    session_id:        str
     interaction_count: int = 0
-    config: ElaraConfig = Field(default_factory=ElaraConfig)
-    bandit: BanditState = Field(default_factory=BanditState)
-    history: List[ConversationTurn] = Field(default_factory=list)
+    config:            ElaraConfig = Field(default_factory=ElaraConfig)
+    personality:       PersonalityVector = Field(default_factory=PersonalityVector)
+    bandit:            BanditState = Field(default_factory=BanditState)
+    history:           List[ConversationTurn] = Field(default_factory=list)
 
-    # FIX #2: track consecutive non-calm turns for the distress watchdog
-    consecutive_distress_turns: int = 0
-    # Prevent duplicate emails within the same distress episode; resets when calm returns
-    caregiver_alerted: bool = False
+    consecutive_distress_turns: int  = 0
+    caregiver_alerted:          bool = False
 
 
 class ChatRequest(BaseModel):
-    message: str
-    state: Optional[SessionState] = None
-    backend: str = "ollama"
-    model: Optional[str] = None
+    message:        str
+    state:          Optional[SessionState] = None
+    backend:        str = "ollama"
+    model:          Optional[str] = None
     memory_context: Optional[str] = None
 
 
 class AdaptationDiagnostics(BaseModel):
-    affect: str
-    confidence: float
-    signals_used: List[str]
-    config_changes: Dict[str, Any]
-    reward_applied: Optional[float]
-    ucb_action_id: int
-    ucb_scores: List[float]
-    escalation_rule: Optional[str] = None
-    # FIX #2 + #3: surface watchdog and immediate-reward info to callers
-    distress_turns: int = 0
-    caregiver_alert: bool = False
+    affect:                  str
+    confidence:              float
+    signals_used:            List[str]
+    config_changes:          Dict[str, Any]
+    reward_applied:          Optional[float]
+    ucb_action_id:           int
+    ucb_scores:              List[float]
+    escalation_rule:         Optional[str] = None
+    distress_turns:          int = 0
+    caregiver_alert:         bool = False
     immediate_reward_applied: bool = False
 
 
 class ChatResponse(BaseModel):
-    reply: str
-    state: SessionState
+    reply:       str
+    state:       SessionState
     diagnostics: AdaptationDiagnostics
 
 
@@ -138,28 +126,18 @@ class ChatResponse(BaseModel):
 
 class ConversationAdapter:
 
-    MAX_HISTORY_TURNS  = 10
-    MAX_SERVICE_TURNS  = 10
+    MAX_HISTORY_TURNS = 10
+    MAX_SERVICE_TURNS = 10
 
-    def handle_turn(
-        self,
-        req: ChatRequest,
-        learning_pipeline: Callable,
-    ) -> ChatResponse:
+    def handle_turn(self, req: ChatRequest, learning_pipeline: Callable) -> ChatResponse:
 
-        # ── 1. Restore or initialise session state ────────────────────────
         state = req.state or self._new_session()
         state.interaction_count += 1
 
-        # ── 2. Append user message to history ─────────────────────────────
         ts = datetime.now(timezone.utc).isoformat()
-        state.history.append(
-            ConversationTurn(role="user", content=req.message, timestamp=ts)
-        )
+        state.history.append(ConversationTurn(role="user", content=req.message, timestamp=ts))
 
-        # ── FIX #3: Check for immediate positive feedback BEFORE pipeline ─
-        # If the user explicitly says "thank you / that helped", we apply a
-        # reward directly now — without waiting for next-turn affect change.
+        # Pre-pipeline: immediate positive reward for explicit thanks
         immediate_reward_applied = False
         if (
             _POSITIVE_FEEDBACK_PATTERNS.search(req.message)
@@ -168,26 +146,13 @@ class ConversationAdapter:
         ):
             self._apply_immediate_reward(state, _IMMEDIATE_POSITIVE_REWARD)
             immediate_reward_applied = True
-            log.info(
-                "[adapter] Immediate positive reward +%.1f applied for session %s",
-                _IMMEDIATE_POSITIVE_REWARD,
-                state.session_id,
-            )
-            # FIX #1-double-reward: Null out previous_action_id so the
-            # normal pipeline reward update (app.py _run_learning_pipeline)
-            # skips its bandit.update() call for this turn.  Without this,
-            # the same (prev_features, prev_action_id) pair receives two
-            # updates — the immediate +1.0 here AND the affect-transition
-            # reward — inflating the bandit's estimate of the action.
             state.bandit.previous_action_id = None
 
-        # ── 3. Build Learning Agent request ───────────────────────────────
-        la_turns      = self._history_to_la_turns(state.history)
-        la_config     = self._config_to_la_config(state.config)
-        la_prev_config = (
-            self._config_to_la_config(state.bandit.previous_config)
-            if state.bandit.previous_config else None
-        )
+        # Build Learning Agent request
+        la_turns     = self._history_to_la_turns(state.history)
+        la_config    = self._state_to_la_config(state)
+        la_prev_cfg  = self._elara_to_la_config(state.bandit.previous_config, state.personality) \
+                       if state.bandit.previous_config else None
 
         from learning_agent.schemas import AnalyseRequest, ConversationWindow
         la_req = AnalyseRequest(
@@ -197,46 +162,53 @@ class ConversationAdapter:
             current_config=la_config,
             previous_affect=state.bandit.previous_affect,
             previous_action_id=state.bandit.previous_action_id,
-            previous_config=la_prev_config,
+            previous_config=la_prev_cfg,
             affect_window=state.bandit.affect_window[-5:],
             interaction_count=state.interaction_count,
         )
 
-        # ── 4. Run Learning Agent pipeline ────────────────────────────────
         la_resp = learning_pipeline(la_req)
 
-        # ── 5. Update bandit tracking state ───────────────────────────────
+        # Apply personality delta from bandit action
+        if la_resp.updated_personality is not None:
+            state.personality = la_resp.updated_personality
+
+        # Apply personality hints (direct supervised nudge from NLPSignals)
+        if hasattr(la_resp, "personality_hints") and la_resp.personality_hints:
+            state.personality = self._apply_hints(state.personality, la_resp.personality_hints)
+
+        # Apply context gate (caps/floors per affect)
+        affect = la_resp.inferred_state.affect
+        state.personality = state.personality.apply_gate(affect)
+
+        # Sync legacy ElaraConfig from personality
+        state.config = self._personality_to_elara_config(state.personality)
+
+        # Track bandit state
         state.bandit.previous_config     = ElaraConfig(**state.config.model_dump())
-        state.bandit.previous_affect     = la_resp.inferred_state.affect
+        state.bandit.previous_affect     = affect
         state.bandit.previous_action_id  = la_resp.bandit_context.action_id
         state.bandit.previous_context_id = la_resp.bandit_context.context_id
+        state.bandit.affect_window = (state.bandit.affect_window + [affect])[-5:]
 
-        state.bandit.affect_window = (
-            state.bandit.affect_window + [la_resp.inferred_state.affect]
-        )[-5:]
-
-        # ── FIX #2: Update distress watchdog counter ──────────────────────
+        # Distress watchdog
         caregiver_alert = False
-        if la_resp.inferred_state.affect == "calm":
+        if affect == "calm":
             state.consecutive_distress_turns = 0
-            state.caregiver_alerted = False  # new episode can trigger alert again
+            state.caregiver_alerted = False
         else:
             state.consecutive_distress_turns += 1
-
         caregiver_alert = self._check_distress_watchdog(state)
 
-        # ── 6. Apply config delta ─────────────────────────────────────────
-        if la_resp.config_delta.apply and la_resp.config_delta.changes:
-            for k, v in la_resp.config_delta.changes.items():
-                if hasattr(state.config, k):
-                    setattr(state.config, k, v)
+        # Build system prompt with style directive
+        system_prompt = build_persona_prompt(
+            _PERSONA,
+            req.message,
+            state.config.model_dump(),
+            req.memory_context,
+            personality=state.personality,
+        )
 
-        # ── 7. Build system prompt ────────────────────────────────────────
-        config_dict   = state.config.model_dump()
-        system_prompt = build_persona_prompt(_PERSONA, req.message, config_dict, req.memory_context)
-
-        # After the first exchange, inject a hard reminder to skip greetings.
-        # Placed at the END of the system prompt so it's the most recent context.
         has_prior_reply = any(t.role == "assistant" for t in state.history)
         if has_prior_reply:
             system_prompt += (
@@ -244,29 +216,22 @@ class ConversationAdapter:
                 "The conversation is already in progress. Respond directly."
             )
 
-        # ── 8. Build LLM message list ─────────────────────────────────────
         messages = [{"role": "system", "content": system_prompt}]
         for turn in state.history[-(self.MAX_HISTORY_TURNS * 2):]:
             llm_role = "assistant" if turn.role == "assistant" else "user"
             messages.append({"role": llm_role, "content": turn.content})
 
-        # ── 9. Call LLM ───────────────────────────────────────────────────
         max_tokens = _PACE_TOKENS.get(state.config.pace, 300)
         try:
             reply = collect_stream(
-                messages,
-                backend=req.backend,
-                model=req.model,
-                max_tokens=max_tokens,
-                print_live=False,
+                messages, backend=req.backend, model=req.model,
+                max_tokens=max_tokens, print_live=False,
             )
         except Exception as exc:
             log.error("LLM call failed: %s", exc)
             reply = "I'm sorry, I'm having a little trouble thinking right now. Please try again."
 
-        # Strip spurious greeting from the start of replies after the first turn.
-        # Mistral consistently prepends "Hello [Name]," even when instructed not to.
-        # Strip whitespace first: the LLM often emits a leading space before "Hello".
+        # Strip spurious greeting Mistral emits after the first turn
         if has_prior_reply and reply:
             import re as _re
             reply = _re.sub(
@@ -275,16 +240,12 @@ class ConversationAdapter:
                 reply.strip(),
             ).strip()
 
-        # ── 10. Append assistant reply to history & trim ──────────────────
-        state.history.append(
-            ConversationTurn(role="assistant", content=reply, timestamp=ts)
-        )
+        state.history.append(ConversationTurn(role="assistant", content=reply, timestamp=ts))
         if len(state.history) > self.MAX_HISTORY_TURNS * 2:
             state.history = state.history[-(self.MAX_HISTORY_TURNS * 2):]
 
-        # ── 11. Build diagnostics ─────────────────────────────────────────
         diag = AdaptationDiagnostics(
-            affect=la_resp.inferred_state.affect,
+            affect=affect,
             confidence=la_resp.inferred_state.confidence,
             signals_used=la_resp.inferred_state.signals_used,
             config_changes=la_resp.config_delta.changes,
@@ -299,16 +260,10 @@ class ConversationAdapter:
 
         return ChatResponse(reply=reply, state=state, diagnostics=diag)
 
-    # ── FIX #2: Distress watchdog ─────────────────────────────────────────────
+    # ── Distress watchdog ─────────────────────────────────────────────────────
 
     @staticmethod
     def _check_distress_watchdog(state: SessionState) -> bool:
-        """
-        If the user has been non-calm for DISTRESS_TURN_LIMIT consecutive turns,
-        fire a caregiver alert (email via SendGrid) and return True.
-        The alert fires once per distress episode; caregiver_alerted resets when
-        the user returns to calm.
-        """
         if state.consecutive_distress_turns >= DISTRESS_TURN_LIMIT:
             if not state.caregiver_alerted:
                 send_caregiver_alert(state.session_id, state.consecutive_distress_turns)
@@ -316,19 +271,10 @@ class ConversationAdapter:
             return True
         return False
 
-    # ── FIX #3: Immediate reward injection ───────────────────────────────────
+    # ── Immediate reward injection ────────────────────────────────────────────
 
     @staticmethod
     def _apply_immediate_reward(state: SessionState, reward: float) -> None:
-        """
-        Inject a positive reward directly into the bandit for the previous
-        action, without waiting for next-turn affect to improve.
-
-        This is called when the user explicitly signals satisfaction
-        ("thank you", "that helped", etc.).
-
-        We import storage here to avoid a circular import at module level.
-        """
         from learning_agent.storage import tables_locked
         from learning_agent.state_classifier import encode_context_features
 
@@ -339,11 +285,9 @@ class ConversationAdapter:
         ):
             return
 
-        prev_cfg = state.bandit.previous_config
         features = encode_context_features(
             state.bandit.previous_affect,
-            prev_cfg.clarity_level,
-            prev_cfg.pace,
+            state.personality,
         )
 
         from learning_agent.bandit import LinUCBBandit
@@ -352,6 +296,33 @@ class ConversationAdapter:
             bandit.update(features, state.bandit.previous_action_id, reward)
             A[:] = bandit.A
             b[:] = bandit.b
+
+    # ── Personality hint application ──────────────────────────────────────────
+
+    @staticmethod
+    def _apply_hints(personality: PersonalityVector, hints: dict) -> PersonalityVector:
+        """Nudge personality toward explicit user preference signals."""
+        d = personality.model_dump()
+        for dim, target in hints.items():
+            if target is None or dim not in d:
+                continue
+            curr = d[dim]
+            direction = 1 if target > curr else -1
+            d[dim] = round(max(0.0, min(1.0, curr + direction * _HINT_STEP)), 3)
+        return PersonalityVector(**d)
+
+    # ── ElaraConfig ↔ PersonalityVector ──────────────────────────────────────
+
+    @staticmethod
+    def _personality_to_elara_config(p: PersonalityVector) -> ElaraConfig:
+        pace          = "slow" if p.pace < 0.35 else "fast" if p.pace > 0.65 else "normal"
+        clarity_level = 1 if p.clarity > 0.75 else 3 if p.clarity < 0.45 else 2
+        confirm       = "high" if p.patience > 0.70 else "medium" if p.patience > 0.45 else "low"
+        patience_mode = p.patience > 0.75 or p.warmth > 0.82
+        return ElaraConfig(
+            pace=pace, clarity_level=clarity_level,
+            confirmation_frequency=confirm, patience_mode=patience_mode,
+        )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -373,13 +344,25 @@ class ConversationAdapter:
         return result
 
     @staticmethod
-    def _config_to_la_config(config):
+    def _state_to_la_config(state: SessionState):
         from learning_agent.schemas import CurrentConfig
+        return CurrentConfig(
+            pace=state.config.pace,
+            clarity_level=state.config.clarity_level,
+            confirmation_frequency=state.config.confirmation_frequency,
+            patience_mode=state.config.patience_mode,
+            personality=state.personality,
+        )
+
+    @staticmethod
+    def _elara_to_la_config(config: Optional[ElaraConfig], personality: PersonalityVector):
         if config is None:
-            return CurrentConfig()
+            return None
+        from learning_agent.schemas import CurrentConfig
         return CurrentConfig(
             pace=config.pace,
             clarity_level=config.clarity_level,
             confirmation_frequency=config.confirmation_frequency,
             patience_mode=config.patience_mode,
+            personality=personality,
         )

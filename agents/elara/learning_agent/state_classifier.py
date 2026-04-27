@@ -3,74 +3,38 @@ Layer 2 — State Classifier
 
 Affect states: frustrated | confused | sad | calm | disengaged
 
-Four input signals:
-  sentiment_score  : VADER compound       (-1 to +1)
-  repetition_score : TF-IDF cosine        (0 to 1)
-  confusion_score  : confusion keywords   (0 to 1)
-  sadness_score    : sadness keywords     (0 to 1)
+Input: NLPSignals (from nlp_layer) containing:
+  sentiment  : LLM-extracted compound score    (-1 to +1)
+  repetition : Jaccard word overlap             (0 to 1)
+  confusion  : LLM-extracted confusion score   (0 to 1)
+  sadness    : LLM-extracted sadness score     (0 to 1)
 
 Decision priority (checked top to bottom, first match wins):
-  frustrated   : strong negative + repetition  → needs clarity + pace + patience
-  confused     : confusion keywords or repetition → needs clarity + confirmation
-  sad          : sadness keywords (no confusion) → needs patience + empathy only
-  disengaged   : very short / minimal input with neutral/no signal → needs re-engagement
+  frustrated   : strong negative + repetition
+  confused     : confusion signal or repetition
+  sad          : sadness signal (no confusion)
+  disengaged   : very short input with neutral signal
   calm         : none of the above
 
 ── Escalation Smoother ───────────────────────────────────────────────────────
-After the raw affect is determined, apply_escalation_rules() inspects the
-rolling affect_window (last N classifications sent by the caller) and may
-downgrade the raw affect if the evidence is insufficient to justify a sudden
-jump.
+After raw affect is determined, apply_escalation_rules() inspects the rolling
+affect_window and may downgrade the raw affect if evidence is insufficient.
 
-The core principle: affect should escalate gradually.
-  calm → confused → frustrated    ✓  (one step at a time)
-  calm → frustrated               ✗  (skip-level jump — needs very strong evidence)
+Rules (in order, first match wins):
+  R3  all_calm_history      — frustrated after all-calm window → confused
+  R1  insufficient_streak   — frustrated needs ≥2 consecutive non-calm turns
+  R4  disengaged_calm_history — short message after all-calm → calm (not disengaged)
 
-Rules (checked in order, first match wins):
+── Feature encoding ──────────────────────────────────────────────────────────
+encode_context_features(affect, personality) → 14D vector
+  [ One-Hot Affect (5D) | PersonalityVector (9D) ]
 
-  Frustrated rules:
-    R3  all_calm_history
-        If every entry in the window is calm, frustrated is downgraded to
-        confused regardless of signal strength.
-
-    R1  insufficient_streak
-        Frustrated is only allowed to stand if the window ends with at least
-        MIN_NONCALM_STREAK (2) consecutive non-calm entries. A single non-calm
-        turn is always suppressed; two or more consecutive non-calm turns means
-        the escalation is genuine and earned.
-        all_signals_fired bypasses this so genuine multi-signal frustration
-        can still escalate even from a short streak.
-
-  Disengaged rule:
-    R4  disengaged_calm_history
-        FIX: disengaged can fire on any very short message (≤3 words) even
-        after an entirely calm history — e.g. "Yes." or "Okay." said by a
-        user who is simply being brief. This false positive then trains the
-        bandit on a spurious disengaged state.
-        If the window is entirely calm and the raw affect is disengaged,
-        downgrade to calm. A genuinely disengaged user will show a pattern
-        of short messages across multiple turns; a single short message
-        after calm history is more likely brevity than disengagement.
-
-These rules are additive dampeners — they never upgrade an affect, only
-downgrade it. The full multi-signal frustrated path (negative + repetition +
-strong keywords) bypasses R1 so genuine sustained frustration is still caught.
-
-── affect_window validation ──────────────────────────────────────────────────
-FIX: the escalation smoother trusted the caller to send valid affect strings.
-A malformed window (typo, wrong length, stale data) silently produced
-incorrect escalation decisions because unknown strings would never match
-"calm", making the all-calm guard unreliable.
-Now any unrecognised entry is stripped with a warning before the window is
-used. The original list is never mutated.
-
-N_CONTEXTS is exported here as the single source of truth.
-bandit.py and storage.py import from here to avoid definition drift.
+N_CONTEXTS = 5 (one per affect state) — used only for diagnostics.
 """
 
 from __future__ import annotations
 import logging
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
 import numpy as np
 
 log = logging.getLogger(__name__)
@@ -80,20 +44,17 @@ SENTIMENT_THRESHOLD   = -0.2
 REPETITION_THRESHOLD  = 0.55
 CONFUSION_THRESHOLD   = 0.5
 SADNESS_THRESHOLD     = 0.5
-DISENGAGED_WORD_COUNT = 3    # messages with ≤ this many words trigger disengaged check
+DISENGAGED_WORD_COUNT = 3
 
-# Escalation smoother settings
-WINDOW_SIZE        = 5   # how many past affects the caller should send
-MIN_NONCALM_STREAK = 2   # consecutive non-calm turns required before frustrated is allowed
+WINDOW_SIZE        = 5
+MIN_NONCALM_STREAK = 2
 
 # ── Encoding maps ─────────────────────────────────────────────────────────────
 AFFECT_MAP  = {"frustrated": 0, "confused": 1, "sad": 2, "calm": 3, "disengaged": 4}
-CLARITY_MAP = {1: 0, 2: 1, 3: 2}
-PACE_MAP    = {"slow": 0, "normal": 1, "fast": 2}
 
-# Single source of truth — imported by bandit.py and storage.py
-N_CONTEXTS = 45   # 5 affects × 9 (3 clarity × 3 pace)
-N_ACTIONS  = 7
+# Single source of truth imported by bandit.py and storage.py
+N_CONTEXTS = 5    # one per affect state (context_id = affect index)
+N_ACTIONS  = 19   # 0=DO_NOTHING, 1-18=INC/DEC per personality dim
 
 _VALID_AFFECTS = frozenset(AFFECT_MAP.keys())
 
@@ -101,24 +62,33 @@ _VALID_AFFECTS = frozenset(AFFECT_MAP.keys())
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def classify_state(
-    sentiment: float,
-    repetition: float,
-    confusion: float = 0.0,
-    sadness: float   = 0.0,
-    last_user_text: str = "",
-    affect_window: Optional[List[str]] = None,
+    signals_or_sentiment,
+    repetition:     float = 0.0,
+    confusion:      float = 0.0,
+    sadness:        float = 0.0,
+    last_user_text: str   = "",
+    affect_window:  Optional[List[str]] = None,
 ) -> Tuple[str, float, List[str], Optional[str]]:
     """
+    Accepts either:
+      classify_state(NLPSignals, last_user_text=..., affect_window=...)
+    or the old positional form:
+      classify_state(sentiment, repetition, confusion, sadness, last_user_text, affect_window)
+    for backward compatibility.
+
     Returns (affect, confidence, signals_used, escalation_rule_applied).
-
-    escalation_rule_applied is None when no rule fired, or a short string
-    describing which rule downgraded the raw affect.
-
-    Extra args default to 0.0 / "" / None for backward compatibility.
     """
-    # FIX: validate and sanitise the affect_window before use.
-    # Unknown strings are stripped with a warning so a stale or malformed
-    # window never silently corrupts escalation decisions.
+    from nlp_layer import NLPSignals
+    if isinstance(signals_or_sentiment, NLPSignals):
+        sig = signals_or_sentiment
+        sentiment  = sig.sentiment
+        repetition = sig.repetition
+        confusion  = sig.confusion
+        sadness    = sig.sadness
+    else:
+        sentiment = float(signals_or_sentiment)
+
+    # Validate and sanitise affect_window
     clean_window: Optional[List[str]] = None
     if affect_window is not None:
         clean_window = []
@@ -127,10 +97,8 @@ def classify_state(
                 clean_window.append(entry)
             else:
                 log.warning(
-                    "[state_classifier] Unknown affect '%s' in affect_window — "
-                    "ignored. Valid values: %s",
+                    "[state_classifier] Unknown affect '%s' in affect_window — ignored.",
                     entry,
-                    sorted(_VALID_AFFECTS),
                 )
 
     negative    = sentiment  < SENTIMENT_THRESHOLD
@@ -225,21 +193,17 @@ def apply_escalation_rules(
     all_signals_fired: bool,
 ) -> Tuple[str, float, Optional[str]]:
 
-    # ── R4: disengaged after all-calm history → brevity, not disengagement ──
-    # Must run BEFORE the empty-window early-return so that first-turn greetings
-    # (empty window) are never classified as disengaged.
+    # R4: disengaged after all-calm history → brevity, not disengagement
     if raw_affect == "disengaged":
         if not affect_window or all(a == "calm" for a in affect_window[-WINDOW_SIZE:]):
             return "calm", raw_conf * 0.9, "R4_calm_history_not_disengaged"
         return raw_affect, raw_conf, None
 
-    # All frustrated rules require a non-empty history window.
     if not affect_window:
         return raw_affect, raw_conf, None
 
     window = affect_window[-WINDOW_SIZE:]
 
-    # ── Frustrated rules ────────────────────────────────────────────────────
     if raw_affect != "frustrated":
         return raw_affect, raw_conf, None
 
@@ -259,45 +223,41 @@ def apply_escalation_rules(
 
 # ── Context encoder ───────────────────────────────────────────────────────────
 
-def encode_context_id(affect: str, clarity_level: int, pace: str) -> int:
-    """
-    Maps (affect, clarity_level, pace) to a unique integer in [0, N_CONTEXTS).
-
-    Encoding:
-        affect_idx (0-4) × 9  +  clarity_idx (0-2) × 3  +  pace_idx (0-2)
-    """
-    a = AFFECT_MAP.get(affect, AFFECT_MAP["calm"])
-    c = CLARITY_MAP.get(clarity_level, 1)
-    p = PACE_MAP.get(pace, 1)
-    return a * 9 + c * 3 + p
+def encode_context_id(affect: str, *_args) -> int:
+    """Returns affect index 0-4. Extra args ignored (backward compat)."""
+    return AFFECT_MAP.get(affect, AFFECT_MAP["calm"])
 
 
-def encode_context_features(affect: str, clarity_level: int, pace: str) -> np.ndarray:
+def encode_context_features(affect: str, personality_or_clarity, pace: str = "normal") -> np.ndarray:
     """
-    Encodes state into a 7-dimensional feature vector for LinUCB.
-    Vector structure: [One-Hot Affect (5), Clarity Level (1), Pace Value (1)]
+    Encodes state into a 14D feature vector for LinUCB.
+
+    Accepts either:
+      encode_context_features(affect, PersonalityVector)   — new 14D form
+      encode_context_features(affect, clarity_level, pace) — old 7D form (upgraded to 14D)
+
+    Vector structure: [ One-Hot Affect (5D) | PersonalityVector (9D) ]
     """
-    # 1. One-hot encode the affect (5 dimensions)
+    # One-hot affect (5D)
     affect_vec = np.zeros(len(AFFECT_MAP), dtype=float)
-    idx = AFFECT_MAP.get(affect, AFFECT_MAP["calm"])
-    affect_vec[idx] = 1.0
-    
-    # 2. Numeric encoding for config (allows linear generalization)
-    # Clarity is already 1, 2, or 3
-    # Pace: slow=0.0, normal=1.0, fast=2.0
-    pace_val = float(PACE_MAP.get(pace, 1))
-    
-    return np.concatenate([
-        affect_vec, 
-        [float(clarity_level)], 
-        [pace_val]
-    ])
+    affect_vec[AFFECT_MAP.get(affect, AFFECT_MAP["calm"])] = 1.0
+
+    # Personality dims (9D) — duck-type check avoids import-path mismatch
+    if hasattr(personality_or_clarity, "to_array"):
+        pers_vec = personality_or_clarity.to_array()
+    else:
+        # Legacy path: reconstruct a PersonalityVector from old clarity/pace
+        clarity_level = int(personality_or_clarity)
+        clarity_val   = {1: 0.9, 2: 0.65, 3: 0.4}.get(clarity_level, 0.65)
+        pace_val      = {"slow": 0.25, "normal": 0.5, "fast": 0.75}.get(pace, 0.5)
+        pers_vec      = PV(clarity=clarity_val, pace=pace_val).to_array()
+
+    return np.concatenate([affect_vec, pers_vec])
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _trailing_noncalm_streak(window: List[str]) -> int:
-    """Count how many consecutive non-calm entries END the window."""
     streak = 0
     for entry in reversed(window):
         if entry != "calm":
