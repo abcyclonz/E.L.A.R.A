@@ -1,0 +1,470 @@
+================================================================================
+  E.L.A.R.A. — SYSTEM OVERVIEW & FEATURE LOG
+  Emotionally Linked Adaptive Responsive Assistant
+================================================================================
+
+
+================================================================================
+  CHANGELOG
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+[2026-04-29]  Proactive curiosity system + 7-bug quality pass
+────────────────────────────────────────────────────────────────────────────────
+
+NEW — Curiosity / Proactive System  (agents/elara/curiosity_agent/)
+  • Added CuriosityItem schema (question, topic_triggers, suppress_if_topics,
+    suppress_if_affects, emotional_sensitivity, priority, ask_count)
+  • Generator: passive Ollama call every 10 turns reads memory snapshot + last
+    6 turns and produces 6-8 natural questions Elara is curious to ask
+    ("Hey, how's David doing?", "Did your knee feel better?")
+  • Injector: rule-based scoring (trigger word bonus +0.45) + sensitivity gate
+    + affect suppression (blocked when sad/frustrated) + LLM timing veto for
+    high-sensitivity items (score < 6 = don't ask)
+  • proactive_receptiveness EMA (starts 0.7): drops on negative response,
+    rises on positive; goes silent below 0.15
+  • Added to SessionState: curiosity_queue, curiosity_refresh_counter,
+    last_proactive_turn, proactive_receptiveness, last_was_proactive
+  • Wired into both adapter.py handle_turn() and app.py streaming endpoint
+
+BUG FIX — Reminder routing  (orchestrator/app/main.py)
+  • Small LLM was frequently mis-routing reminder requests to STORE_MEMORY
+  • Added keyword short-circuits before LLM router:
+      "remind me / set a reminder / don't let me forget" → USE_TOOL | reminder
+      "what reminders / list reminders / my reminders"  → USE_TOOL | reminder
+
+BUG FIX — Gratitude handling  (orchestrator/app/main.py)
+  • "Thanks so much for everything today" was reaching the LLM router and
+    getting confused responses
+  • Added short-circuit: messages starting with thanks/thank you/cheers (≤10
+    words) → return canned "You're welcome!" without hitting LLM router
+
+BUG FIX — Affect over-escalation after calm  (elara/learning_agent/state_classifier.py)
+  • Low-confidence sad signal (< 0.65) immediately after a calm turn was
+    persisting incorrectly (e.g. user mentions retirement → model reads as sad)
+  • Added escalation rule R5: low-conf sad after calm → stay calm
+
+BUG FIX — Memory context pollution  (orchestrator/app/agents.py)
+  • Operational meta-claims (intent, goal, calendar, destination) extracted
+    from tool use were leaking into Elara's memory context on future turns
+  • Added _SKIP_ATTRIBUTES filter: intent/goal/looking_for/searching_for/
+    calendar/destination/current never shown to Elara even if stored in DB
+
+BUG FIX — Elara complaint routing  (orchestrator/app/main.py)
+  • "I already told you", "you never remember anything I say" were being routed
+    to STORE_MEMORY; should go to DIRECT_CHAT for empathetic handling
+  • Added _ELARA_COMPLAINT_RE short-circuit → DIRECT_CHAT
+
+BUG FIX — Memory retrieval questions  (orchestrator/app/main.py)
+  • "Do you remember where David lives?", "What do you know about me so far?"
+    were routed to STORE_MEMORY instead of RETRIEVE_MEMORY
+  • Added _MEMORY_QUESTION_RE short-circuit → RETRIEVE_MEMORY
+
+BUG FIX — Elara-directed opinion questions  (orchestrator/app/main.py)
+  • "What do you think of gardening?" was routed to STORE_MEMORY
+  • Added _ELARA_OPINION_RE short-circuit: "What do you think/feel of/about X"
+    → DIRECT_CHAT
+
+BUG FIX — Apology / social recovery routing  (orchestrator/app/main.py)
+  • "Sorry, I'm just having a bad day" routed to STORE_MEMORY
+  • Added _APOLOGY_RE short-circuit → DIRECT_CHAT
+
+BUG FIX — Positive social feedback routing  (orchestrator/app/main.py)
+  • "You know what, you're actually quite good company!" routed to STORE_MEMORY
+  • Added _SOCIAL_POSITIVE_RE short-circuit → DIRECT_CHAT
+
+BUG FIX — Elara mentioning deceased wife on unrelated topics  (multiple files)
+  • Elara was bringing up wife/death/roses when user was discussing cricket,
+    garden, or weather — grounding facts for deceased status were being treated
+    as context to volunteer in every reply
+  • Three-layer fix:
+    1. Persona rule 8 in rag.py: hard rule — only mention death/grief/loss when
+       user's current message explicitly contains words like "miss", "passed
+       away", "died", "grave", "funeral" etc.
+    2. Grounding format split in agents.py: grief-related grounding facts
+       (attribute = relationship/presence/deceased, value = deceased/absent)
+       now rendered in a separate "[Sensitive background — DO NOT mention unless
+       user raises this topic]" block, distinct from normal background facts
+    3. Grounding header changed from "never forget" (caused model to always
+       reference) to "reference only when directly relevant"
+
+CLEANUP — Stale memory entries
+  • Cleaned cross-session DB contamination for test speaker User_1:
+    removed Gunnison CO restaurants, Patricia/Edinburgh data, Margaret/Biscuit
+    entries, user.emotion=frustrated stale fact, user.plan=Aster Medcity,
+    wife.presence=absent (redundant with wife.relationship=deceased)
+
+
+
+WHAT IS ELARA?
+--------------
+ELARA is a real-time, affect-adaptive AI companion designed for elderly users.
+It listens through a microphone, understands who is speaking, remembers things
+across conversations, learns how to communicate based on the user's emotional
+state, and can search the web, set reminders, and manage calendar events — all
+through natural voice conversation.
+
+Full pipeline:
+  Microphone
+    → VAD (silence detection)
+    → STT (speech-to-text) + Speaker ID (who is talking)
+    → Orchestrator (routes the message)
+    → Memory Agent (stores / retrieves personal facts)
+    → Tool Servers (web search, reminders, calendar)
+    → Elara Conversation Agent (generates reply)
+    → TTS (text-to-speech output)
+
+
+================================================================================
+  SERVICES
+================================================================================
+
+  Service            Port   Description
+  ─────────────────  ─────  ────────────────────────────────────────────────────
+  Memory Agent       8000   PostgreSQL + pgvector — stores all user memory
+  Orchestrator       8001   LLM router + workflow coordinator
+  Elara Agent        8002   Conversation engine with personality & affect
+  Web Search Tool    8010   MCP server wrapping Tavily search API
+  Assistant Tool     8011   MCP server — reminders & calendar (SQLite + Google)
+  PostgreSQL         5432   pgvector/pg16 — backing store for memory agent
+  Redis              6379   Per-speaker session state (survives restarts)
+  Frontend           3000   Web UI (Next.js)
+
+
+================================================================================
+  FEATURES
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+1. VOICE PIPELINE  (MIC/)
+────────────────────────────────────────────────────────────────────────────────
+
+  • Microphone capture via PyAudio (16 kHz, mono, int16, 512-frame chunks)
+  • Silero VAD (Voice Activity Detection) — filters silence, triggers on speech
+  • Faster-Whisper STT (base.en model, CPU int8) — transcribes speech to text
+  • SpeechBrain ECAPA-TDNN speaker identification — cosine similarity, threshold 0.25
+    Auto-registers new speakers as User_1, User_2, etc.
+  • Silence timeout (0.8s) marks end of phrase; min phrase length 0.5s
+  • STT and speaker ID run in parallel threads for low latency
+
+
+────────────────────────────────────────────────────────────────────────────────
+2. MEMORY SYSTEM  (agents/memory/)
+────────────────────────────────────────────────────────────────────────────────
+
+  Three memory layers in PostgreSQL:
+
+    STATE   — mutable facts about the user (name, location, job, mood)
+              Versioned: each update closes the old row (valid_to) and opens a new one
+    BELIEF  — subjective opinions and feelings ("I think...", "I feel...")
+              Also versioned with history
+    EVENT   — immutable things that happened (achievements, incidents, appointments)
+              768D embeddings (nomic-embed-text) for semantic search
+
+  Every claim carries:
+    • importance  (0–1): how fundamental is this fact to understanding the person
+    • stability   (permanent | stable | transient): how long it should persist
+
+  Salience scoring (used to rank what to show Elara):
+    salience = importance × 0.40 + recency × 0.40 + frequency × 0.20
+    Recency uses half-life decay:
+      permanent = 3650 days (10 years) — name, deceased relatives, birthplace
+      stable    = 365 days  (1 year)  — job, home, long-term relationships
+      transient = 14 days   (2 weeks) — mood, today's plan, passing remark
+    Facts below salience 0.10 are excluded from normal retrieval (soft forgetting)
+
+  LLM claim extraction:
+    Ollama (Mistral 7B) reads each user message and extracts typed claims
+    with importance and stability values. Rates bereavement, serious illness,
+    and key relationships at 0.9+ importance / permanent stability.
+
+  Episodic memory:
+    Every conversation turn is stored verbatim with a 768D embedding.
+    Semantic search over episodes for "remember when..." style recall.
+
+  LLM relevance reranking:
+    After salience filtering, a single Ollama call scores each candidate 0–10.
+    Final score = salience × 0.5 + LLM relevance × 0.5.
+
+  GROUNDING LAYER  (built recently):
+    High-importance permanent facts (importance ≥ 0.85, stability = permanent)
+    are auto-flagged as "grounding" in the database.
+    Examples: mother passed away, user has two sons, user was born in Kerala.
+    Grounding facts are fetched on EVERY turn (no salience decay, no query needed)
+    and prepended to Elara's prompt as a permanent background block.
+    This means Elara always "knows" these things even when talking about
+    completely unrelated topics like coffee shops or the weather.
+    Existing facts are backfilled automatically on startup.
+
+
+────────────────────────────────────────────────────────────────────────────────
+3. ORCHESTRATOR / ROUTER  (agents/orchestrator/)
+────────────────────────────────────────────────────────────────────────────────
+
+  5-way LLM router decides what to do with each user message:
+
+    STORE_MEMORY       — user is stating a personal fact → store to memory
+    RETRIEVE_MEMORY    — user is asking about personal history → retrieve from memory
+    STORE_AND_RETRIEVE — user is correcting a stored fact → update + retrieve
+    USE_TOOL           — user needs web search, reminder, or calendar
+    DIRECT_CHAT        — greeting, small talk, Elara-directed question → skip memory
+
+  Pre-routing short-circuits (bypass the LLM router entirely):
+    • Single-word affirmations (ok, yes, sure, yeah...) → always DIRECT_CHAT
+    • Gratitude phrases (thanks, thank you, cheers) → canned "You're welcome!" reply
+
+  Context-aware routing  (built recently):
+    The last 4 turns of conversation are included in the router prompt so it
+    understands corrections ("oh sorry I meant restaurants") and follow-ups.
+
+  Correction / clarification routing  (built recently):
+    Rule (d): if the user is correcting a prior tool request, the router
+    re-routes to USE_TOOL with the same tool (e.g. after a hotel search,
+    "I meant restaurants" → new web_search, not STORE_MEMORY).
+
+  Implicit nearby-search detection  (built recently):
+    Rule (e): "I want a coffee so bad", "I need a taxi" →
+    detected as nearby-search intent → USE_TOOL | web_search.
+    Distinguished from personal statements: "I want to sleep" → STORE_MEMORY.
+    Key rule: want/need [tangible NOUN] = search; want to [VERB] = memory.
+
+  User-directed vs self-directed search distinction  (built recently):
+    "Can you search up nearby me" → USE_TOOL (Elara is asked to search)
+    "I need to search up my friend tomorrow" → STORE_MEMORY (user's own plan)
+
+  DIRECT_CHAT detection improved  (built recently):
+    Questions directed at Elara ("how have you been", "how are you doing",
+    "what do you think") are correctly classified as DIRECT_CHAT instead of
+    being mistakenly stored as memory.
+
+  Context-aware tool parameter extraction  (built recently):
+    When the user's message is vague ("search up nearby me"), the last 4
+    conversation turns are included in the extraction prompt so the LLM can
+    infer the actual search subject from context (e.g. "teddy bear stores
+    near me" from a prior discussion about buying a teddy bear for Gini).
+
+  Style frustration detection:
+    A quick Ollama call detects if the user is frustrated with Elara's
+    communication style (too long, too wordy, too formal). Injects
+    emotion=frustrated before routing.
+
+  Conversation summarization:
+    Every 5 turns, the last N turns are summarised by Ollama and stored
+    as an EVENT in memory so long-term context is not lost.
+
+  Per-speaker session state:
+    Each speaker's Elara session (history, personality, bandit state) is
+    stored in Redis and survives container restarts.
+
+  Authentication:
+    POST /auth/signup — creates account, seeds profile facts into memory
+    POST /auth/login  — returns JWT token
+    POST /chat        — token-gated endpoint for web/app clients
+
+  Grounding facts on every turn  (built recently):
+    /grounding/{speaker_id} is called before routing. The biographical
+    background is passed to Elara regardless of router decision.
+
+
+────────────────────────────────────────────────────────────────────────────────
+4. ELARA CONVERSATION AGENT  (agents/elara/)
+────────────────────────────────────────────────────────────────────────────────
+
+  LLM backend: Mistral 7B via Ollama (default). Groq also supported.
+  TTS: Kokoro (local) or Edge TTS (cloud).
+
+  Personality system (9D PersonalityVector):
+    Dimensions: warmth, humor, playfulness, formality, verbosity, pace,
+                clarity, patience, assertiveness
+    All continuous [0, 1]. Three-layer update each turn:
+      1. Personal Profile (P): EMA of per-user baseline, updated from bandit
+      2. Session Bandit (S): LinUCB selects which dimension to nudge ±0.10
+      3. Context Gate (C): affect-based caps/floors
+         e.g. sad → humor capped at 0.15, warmth floored at 0.75
+    Style directive generated from PersonalityVector and injected into prompt.
+    Max tokens per pace: slow=160, normal=100, fast=60.
+
+  Affect classification:
+    5 states: CALM | FRUSTRATED | CONFUSED | SAD | DISENGAGED
+    NLP signals extracted by structured Ollama call each turn:
+      sentiment, repetition, confusion, sadness, humor_receptive,
+      wants_shorter, wants_simpler, explicit_positive, explicit_negative,
+      personality_hints
+    Short messages (≤2 words) skip the LLM call.
+    Falls back to VADER + keyword lists if Ollama is unreachable.
+    Escalation smoother: 4 rules prevent sudden affect jumps.
+    Rule R4: prevents "Hi" from being classified as disengaged.
+
+  LinUCB contextual bandit:
+    19 actions (DO_NOTHING + INCREASE/DECREASE for each of 9 personality dims)
+    14D feature vector: 5D one-hot affect + 9D PersonalityVector
+    Discount factor γ=0.95, exploration coefficient α=0.8
+    Matrices persisted per-user to Docker volume.
+    Old 7D matrices auto-reinitialized on shape mismatch.
+
+  Distress watchdog:
+    7 consecutive non-calm turns → caregiver_alert: true
+    Sends email via Gmail SMTP (requires GMAIL_APP_PASSWORD env var).
+    Alert sent to ALERT_TO_EMAIL (comma-separated caregiver addresses).
+
+  Greeting reset:
+    Greetings ("hey", "hi", "good morning"...) clear conversation history
+    AND the bandit's affect_window so old emotional context never bleeds
+    into a new session.
+
+  Post-processing:
+    Leading "Hello [Name]" greetings stripped after the first turn.
+
+  CURIOSITY / PROACTIVE SYSTEM  (agents/elara/curiosity_agent/)  [new]:
+
+    Elara now proactively brings up things she's curious about — people,
+    health, hobbies, past events — weaving them naturally into replies.
+
+    CuriosityItem (schemas.py):
+      Each item has: question, topic_triggers, suppress_if_topics,
+      suppress_if_affects, emotional_sensitivity (0–1), priority, ask_count.
+
+    Generator (generator.py):
+      Every 10 turns, a passive Ollama call reads the full memory snapshot
+      and last 6 conversation turns, then produces 6–8 natural questions.
+      Examples it might generate:
+        "Hey, how's David doing these days?"
+        "Did your knee feel any better this week?"
+        "You love cupcakes — did you find a good bakery nearby?"
+
+    Injector (injector.py) — decides when to ask:
+      • Topic trigger:   if current message contains a trigger word, score +0.45
+                         (hotel message → cupcake question becomes timely)
+      • Affect gate:     sad or frustrated → no proactive questions at all
+      • Sensitivity gate: high-sensitivity items (≥ 0.7) only when affect = calm
+      • Topic suppression: suppress_if_topics words in message → blocked
+                           (flowers question suppressed when user mentions funeral)
+      • LLM timing veto:  for sensitivity ≥ 0.6, a fast Ollama call rates timing
+                           0–10; blocked if score < 6 (catches nuanced wrong moments
+                           the rule layer misses — e.g. flowers at a funeral)
+      • Probability gate: base 28%, up to 65% on strong trigger, scaled by
+                          proactive_receptiveness
+
+    Feedback loop:
+      proactive_receptiveness (EMA, starts 0.7) — learned per session:
+        User responds with disengaged/frustrated → −0.25
+        User responds calm + positive sentiment  → +0.10
+        Below 0.15 → proactive goes silent for this session
+      Each question asked at most 3 times; min 4 turns between questions.
+
+    Integration:
+      Proactive question injected as a [Organic curiosity] hint into Elara's
+      system prompt — she weaves it in naturally rather than appending it raw.
+
+
+────────────────────────────────────────────────────────────────────────────────
+5. TOOL SERVERS  (agents/tools/)
+────────────────────────────────────────────────────────────────────────────────
+
+  Web Search (port 8010):
+    Wraps Tavily API. Tool: search(query, max_results=5).
+    Returns Tavily answer summary + top result excerpts.
+    Requires TAVILY_API_KEY in .env.
+
+  Assistant Tools (port 8011):
+    Backed by SQLite at /data/assistant.db (Docker volume, persists restarts).
+    Tools:
+      set_reminder       — store a reminder with natural-language time
+      list_reminders     — list pending reminders for this user
+      complete_reminder  — mark a reminder done by text match
+      add_calendar_event — add event; uses Google Calendar if authenticated,
+                           falls back to SQLite if not
+      list_calendar_events — lists from Google Calendar or SQLite fallback
+
+    Natural language time parsing (dateparser) handles:
+      "tomorrow at 3pm", "next Monday", "evening", "noon", etc.
+
+    Google Calendar integration:
+      OAuth 2.0 via auth_setup.py (one-time local run).
+      token.json + credentials.json stored in google_auth/.
+      Server auto-refreshes expired tokens at runtime.
+
+
+────────────────────────────────────────────────────────────────────────────────
+6. FRONTEND  (frontend/)
+────────────────────────────────────────────────────────────────────────────────
+
+  Next.js web UI served on port 3000.
+  Connects to orchestrator /chat endpoint (auth-gated).
+
+
+================================================================================
+  KEY CONFIGURATION CONSTANTS
+================================================================================
+
+  Constant                   Location                              Value
+  ─────────────────────────  ────────────────────────────────────  ──────────────
+  SILENCE_TIMEOUT            MIC/main.py                           0.8s
+  MIN_AUDIO_LEN              MIC/main.py                           0.5s
+  SIMILARITY_THRESHOLD       MIC/speaker_manager.py                0.25
+  SUMMARIZE_EVERY_N_TURNS    orchestrator/app/config.py            5 turns
+  DISTRESS_TURN_LIMIT        elara/adapter.py                      7 turns
+  BANDIT_GAMMA               elara/learning_agent/bandit.py        0.95
+  BANDIT_ALPHA               elara/learning_agent/bandit.py        0.8
+  MAX_HISTORY_TURNS          elara/adapter.py                      10 pairs
+  N_PERSONALITY_DIMS         elara/learning_agent/personality.py   9
+  N_ACTIONS                  elara/learning_agent/bandit.py        19
+  PERSONALITY_STEP           elara/learning_agent/config_applier.py  0.10
+  SALIENCE_THRESHOLD         memory/app/memory.py                  0.10
+  GROUNDING_THRESHOLD        memory/app/memory.py                  importance ≥ 0.85
+                                                                    + stability = permanent
+  Half-lives                 memory/app/memory.py                  permanent=3650d
+                                                                    stable=365d
+                                                                    transient=14d
+  _CURIOSITY_REFRESH_INTERVAL  elara/conversation_agent/adapter.py 10 turns
+  _MIN_TURNS_GAP             elara/curiosity_agent/injector.py     4 turns
+  _BASE_PROB                 elara/curiosity_agent/injector.py     0.28 (28%)
+  proactive_receptiveness    SessionState (per session)            starts 0.7 (EMA)
+
+
+================================================================================
+  ENVIRONMENT VARIABLES  (.env in project root)
+================================================================================
+
+  TAVILY_API_KEY        — required for web search tool
+  GMAIL_APP_PASSWORD    — 16-char Google App Password for caregiver alerts
+  ALERT_FROM_EMAIL      — Gmail address to send caregiver alerts FROM
+  ALERT_TO_EMAIL        — caregiver address(es), comma-separated
+  CALENDAR_TIMEZONE     — default: Asia/Kolkata
+
+
+================================================================================
+  KNOWN GAPS / FUTURE WORK
+================================================================================
+
+  • Speaker ID persistence: known_speakers is in-memory, lost on restart
+  • Location awareness: web searches for "nearby" have no GPS coordinates;
+    results are city-level at best unless user has stated their location
+  • Bandit cold start: first ~20 turns are exploration; no population warm-start
+  • LLM quality ceiling: Mistral 7B occasionally hallucinates mild emotional
+    context and gives unsolicited advice; Llama 3 70B via Groq would improve this
+  • Health monitor tool: registered but not connected to any sensor data source
+  • Proactive check-ins (in-conversation): IMPLEMENTED via curiosity agent.
+    Scheduled out-of-turn initiation ("Good morning", medication reminders)
+    still not implemented — would require APScheduler + server-push to frontend
+  • Caregiver email: currently only fires on distress watchdog; no free-form
+    email composition on behalf of the user
+
+
+================================================================================
+  HOW TO RUN
+================================================================================
+
+  Full stack:
+    docker compose up --build
+
+  Test client (text input, shows router + affect + personality diagnostics):
+    python test_chat.py           # to orchestrator at :8001
+    python test_chat.py --elara   # direct to Elara at :8002
+
+  MIC module only:
+    cd MIC && python main.py
+
+  Requires: .env file in project root with TAVILY_API_KEY at minimum.
+
+================================================================================

@@ -32,6 +32,8 @@ from learning_agent.personality import PersonalityVector, DIMS
 
 _PACE_TOKENS: Dict[str, int] = {"slow": 160, "normal": 100, "fast": 60}
 
+_CURIOSITY_REFRESH_INTERVAL = 10  # turns between curiosity queue refreshes
+
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "pace": "normal",
     "clarity_level": 2,
@@ -92,6 +94,13 @@ class SessionState(BaseModel):
 
     consecutive_distress_turns: int  = 0
     caregiver_alerted:          bool = False
+
+    # Curiosity / proactive system
+    curiosity_queue:            List[Dict[str, Any]] = Field(default_factory=list)
+    curiosity_refresh_counter:  int   = 0
+    last_proactive_turn:        int   = 0
+    proactive_receptiveness:    float = 0.7   # EMA, learned from user reactions
+    last_was_proactive:         bool  = False  # flag to capture next-turn feedback
 
 
 class ChatRequest(BaseModel):
@@ -169,6 +178,11 @@ class ConversationAdapter:
 
         la_resp = learning_pipeline(la_req)
 
+        # Update proactive receptiveness based on how user responded to last proactive turn
+        if state.last_was_proactive:
+            self._update_proactive_receptiveness(state, la_resp)
+            state.last_was_proactive = False
+
         # Apply personality delta from bandit action
         if la_resp.updated_personality is not None:
             state.personality = la_resp.updated_personality
@@ -200,6 +214,17 @@ class ConversationAdapter:
             state.consecutive_distress_turns += 1
         caregiver_alert = self._check_distress_watchdog(state)
 
+        # Curiosity: refresh queue periodically, then select a proactive question
+        state.curiosity_refresh_counter += 1
+        if req.memory_context and (
+            not state.curiosity_queue
+            or state.curiosity_refresh_counter >= _CURIOSITY_REFRESH_INTERVAL
+        ):
+            self._refresh_curiosity(state, req.memory_context, state.history)
+            state.curiosity_refresh_counter = 0
+
+        proactive_item = self._select_curiosity(state, req.message, affect)
+
         # Build system prompt with style directive
         system_prompt = build_persona_prompt(
             _PERSONA,
@@ -208,6 +233,14 @@ class ConversationAdapter:
             req.memory_context,
             personality=state.personality,
         )
+
+        if proactive_item:
+            system_prompt += (
+                f"\n\n[Organic curiosity — weave into reply naturally]: "
+                f"After addressing the user's message, casually ask: "
+                f"\"{proactive_item.question}\" — make it feel like a spontaneous thought, "
+                f"not an announcement of a new topic. Keep it brief and warm."
+            )
 
         has_prior_reply = any(t.role == "assistant" for t in state.history)
         if has_prior_reply:
@@ -240,6 +273,14 @@ class ConversationAdapter:
                 reply.strip(),
             ).strip()
 
+        if proactive_item:
+            for d in state.curiosity_queue:
+                if d.get("id") == proactive_item.id:
+                    d["ask_count"] = d.get("ask_count", 0) + 1
+                    break
+            state.last_proactive_turn = state.interaction_count
+            state.last_was_proactive  = True
+
         state.history.append(ConversationTurn(role="assistant", content=reply, timestamp=ts))
         if len(state.history) > self.MAX_HISTORY_TURNS * 2:
             state.history = state.history[-(self.MAX_HISTORY_TURNS * 2):]
@@ -259,6 +300,61 @@ class ConversationAdapter:
         )
 
         return ChatResponse(reply=reply, state=state, diagnostics=diag)
+
+    # ── Curiosity / proactive system ──────────────────────────────────────────
+
+    @staticmethod
+    def _refresh_curiosity(state: "SessionState", memory_context: str, history: list) -> None:
+        try:
+            from curiosity_agent.generator import generate_curiosity_items
+            recent = [{"role": t.role, "content": t.content} for t in history[-8:]]
+            items  = generate_curiosity_items(memory_context, recent)
+            if items:
+                state.curiosity_queue = [item.model_dump() for item in items]
+                log.info("curiosity queue refreshed: %d items for %s",
+                         len(state.curiosity_queue), state.session_id)
+        except Exception as exc:
+            log.warning("curiosity refresh failed: %s", exc)
+
+    @staticmethod
+    def _select_curiosity(state: "SessionState", message: str, affect: str):
+        if not state.curiosity_queue:
+            return None
+        try:
+            from curiosity_agent.schemas import CuriosityItem
+            from curiosity_agent.injector import select_proactive, llm_timing_check
+            items = [CuriosityItem(**d) for d in state.curiosity_queue]
+            item  = select_proactive(
+                items, message, affect,
+                state.interaction_count, state.last_proactive_turn,
+                state.proactive_receptiveness,
+            )
+            # LLM timing veto for emotionally sensitive questions
+            if item and item.emotional_sensitivity >= 0.6:
+                if not llm_timing_check(item.question, message, affect):
+                    log.debug("curiosity: LLM timing veto on '%s'", item.question[:50])
+                    item = None
+            return item
+        except Exception as exc:
+            log.warning("curiosity selection failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _update_proactive_receptiveness(state: "SessionState", la_resp) -> None:
+        """Update the proactive receptiveness EMA based on how the user responded."""
+        sentiment = la_resp.diagnostics.sentiment_score
+        affect    = la_resp.inferred_state.affect
+        ema       = state.proactive_receptiveness
+
+        if affect in ("disengaged", "frustrated") or sentiment < -0.3:
+            ema = max(0.0, round(ema - 0.25, 3))
+        elif affect == "calm" and sentiment > 0.2:
+            ema = min(1.0, round(ema + 0.10, 3))
+        # neutral response → no change, just keep going
+
+        state.proactive_receptiveness = ema
+        log.debug("proactive_receptiveness → %.3f (affect=%s, sentiment=%.2f)",
+                  ema, affect, sentiment)
 
     # ── Distress watchdog ─────────────────────────────────────────────────────
 

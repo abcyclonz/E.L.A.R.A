@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elara — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --green: oklch(0.35 0.10 145);
+  --green-light: oklch(0.92 0.06 145);
+  --green-mid: oklch(0.50 0.10 145);
+  --green-dark: oklch(0.25 0.09 145);
+  --ink: oklch(0.13 0.01 145);
+  --ink-2: oklch(0.35 0.02 180);
+  --ink-3: oklch(0.56 0.02 180);
+  --border: rgba(255,255,255,0.45);
+  --border-dark: rgba(0,0,0,0.08);
+  --glass: rgba(255,255,255,0.55);
+  --glass-strong: rgba(255,255,255,0.72);
+  --radius: 20px;
+  --radius-sm: 12px;
+  --font: 'Geist', 'DM Sans', sans-serif;
+  --header-h: 70px;
+}
+
+html, body { height: 100%; font-family: var(--font); color: var(--ink); overflow: hidden; }
+#root { height: 100%; display: flex; flex-direction: column; position: relative; }
+
+/* ── Animated background ── */
+.bg-stage {
+  position: fixed; inset: 0; z-index: 0;
+  background: oklch(0.94 0.04 145);
+  overflow: hidden;
+}
+.blob {
+  position: absolute; border-radius: 50%;
+  filter: blur(70px);
+  will-change: transform;
+}
+.blob-1 {
+  width: 600px; height: 600px; top: -100px; left: -100px;
+  background: oklch(0.80 0.10 145 / 0.55);
+  animation: blobMove1 18s ease-in-out infinite alternate;
+}
+.blob-2 {
+  width: 500px; height: 500px; bottom: -80px; right: -80px;
+  background: oklch(0.72 0.08 180 / 0.45);
+  animation: blobMove2 22s ease-in-out infinite alternate;
+}
+.blob-3 {
+  width: 380px; height: 380px; top: 50%; left: 55%;
+  background: oklch(0.85 0.07 115 / 0.40);
+  animation: blobMove3 16s ease-in-out infinite alternate;
+}
+.blob-4 {
+  width: 280px; height: 280px; top: 20%; right: 20%;
+  background: oklch(0.90 0.05 160 / 0.35);
+  animation: blobMove4 20s ease-in-out infinite alternate;
+}
+.blob-5 {
+  width: 220px; height: 220px; bottom: 25%; left: 30%;
+  background: oklch(0.78 0.09 130 / 0.30);
+  animation: blobMove5 14s ease-in-out infinite alternate;
+}
+
+@keyframes blobMove1 { 0%{transform:translate(0,0) scale(1)} 50%{transform:translate(120px,80px) scale(1.1)} 100%{transform:translate(60px,160px) scale(0.95)} }
+@keyframes blobMove2 { 0%{transform:translate(0,0) scale(1)} 50%{transform:translate(-100px,-60px) scale(1.15)} 100%{transform:translate(-40px,-140px) scale(0.9)} }
+@keyframes blobMove3 { 0%{transform:translate(-50%,-50%) scale(1)} 50%{transform:translate(-50%,-50%) translate(80px,-60px) scale(1.1)} 100%{transform:translate(-50%,-50%) translate(-60px,80px) scale(0.95)} }
+@keyframes blobMove4 { 0%{transform:translate(0,0)} 100%{transform:translate(-80px,60px) scale(1.2)} }
+@keyframes blobMove5 { 0%{transform:translate(0,0)} 100%{transform:translate(60px,-80px) scale(1.15)} }
+
+/* Fine grain overlay */
+.bg-noise {
+  position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+  background-size: 200px;
+}
+
+/* ── Glass card ── */
+.glass-card {
+  background: var(--glass);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 32px rgba(0,0,0,0.08), 0 1px 0 rgba(255,255,255,0.8) inset;
+}
+.glass-card-strong {
+  background: var(--glass-strong);
+  backdrop-filter: blur(32px) saturate(1.8);
+  -webkit-backdrop-filter: blur(32px) saturate(1.8);
+  border: 1px solid rgba(255,255,255,0.7);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.10), 0 1px 0 rgba(255,255,255,0.9) inset;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 99px; }
+
+/* ── Animations ── */
+@keyframes fadeSlide { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+.anim-in { animation: fadeSlide .3s ease forwards; }
+@keyframes spin { to{transform:rotate(360deg)} }
+.spinner { width:16px;height:16px;border:2px solid rgba(255,255,255,0.35);border-top-color:white;border-radius:50%;animation:spin .7s linear infinite;display:inline-block; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.5)} }
+
+/* ── Layout ── */
+.app-shell { position: relative; z-index: 2; height: 100%; display: flex; flex-direction: column; }
+header {
+  height: var(--header-h); flex-shrink: 0;
+  background: rgba(255,255,255,0.60);
+  backdrop-filter: blur(28px) saturate(1.8);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8);
+  border-bottom: 1px solid rgba(255,255,255,0.55);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.06);
+  display: flex; align-items: center; padding: 0 28px; gap: 14px; z-index: 10;
+}
+main { flex: 1; overflow-y: auto; padding: 32px 28px 48px; }
+
+/* Inputs */
+.field-input {
+  width:100%; padding:11px 14px; border:1px solid rgba(0,0,0,0.12);
+  border-radius:var(--radius-sm); font-family:var(--font); font-size:15px;
+  color:var(--ink); background:rgba(255,255,255,0.65); outline:none;
+  backdrop-filter:blur(8px); transition:border-color .18s,box-shadow .18s;
+}
+.field-input:focus { border-color:var(--green); box-shadow:0 0 0 3px oklch(0.35 0.10 145 / 0.12); }
+.field-input::placeholder { color:var(--ink-3); }
+
+/* Buttons */
+.btn-primary {
+  padding:11px 22px; background:var(--green); color:white;
+  border:none; border-radius:var(--radius-sm); font-family:var(--font);
+  font-size:14px; font-weight:600; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  transition:background .18s,box-shadow .18s,transform .1s;
+  box-shadow: 0 2px 12px oklch(0.35 0.10 145 / 0.30);
+}
+.btn-primary:hover { background:var(--green-dark); box-shadow:0 4px 20px oklch(0.35 0.10 145 / 0.40); }
+.btn-primary:active { transform:scale(0.98); }
+.btn-primary:disabled { opacity:0.5; cursor:not-allowed; box-shadow:none; }
+</style>
+</head>
+<body>
+<div class="bg-stage">
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+  <div class="blob blob-4"></div>
+  <div class="blob blob-5"></div>
+</div>
+<div class="bg-noise"></div>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ─── Icons ─── */
+const Ic = ({ d, size=18, sw=1.8, fill='none' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">{d}</svg>
+);
+const IcBrain  = ({size=18}) => <Ic size={size} d={<path d="M9.5 2A2.5 2.5 0 017 4.5v0A2.5 2.5 0 014.5 7H4a2 2 0 00-2 2v2a2 2 0 002 2h.5A2.5 2.5 0 017 15.5v0A2.5 2.5 0 019.5 18h5A2.5 2.5 0 0117 15.5v0A2.5 2.5 0 0119.5 13H20a2 2 0 002-2V9a2 2 0 00-2-2h-.5A2.5 2.5 0 0117 4.5v0A2.5 2.5 0 0114.5 2h-5z"/>}/>;
+const IcCamera = ({size=18}) => <Ic size={size} d={<><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></>}/>;
+const IcMic   = ({size=18, off}) => <Ic size={size} d={off ? <><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6"/><path d="M17 16.95A7 7 0 015 12v-2m14 0v2a7 7 0 01-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></> : <><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></>}/>;
+const IcMoon  = ({size=18}) => <Ic size={size} d={<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>}/>;
+const IcSend  = ({size=18}) => <Ic size={size} d={<><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></>}/>;
+const IcX     = ({size=18}) => <Ic size={size} d={<><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>}/>;
+const IcWave  = ({size=18}) => <Ic size={size} d={<><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></>}/>;
+
+/* ─── Mock data ─── */
+const PROFILE = { name:'Jane Smith', initials:'JS', userId:'usr_01' };
+const MOCK_MEMORIES = [
+  { id:1, date:'Apr 24', text:"Prefers morning calls before 10am." },
+  { id:2, date:'Apr 22', text:"Loves her garden — especially the roses by the gate." },
+  { id:3, date:'Apr 18', text:"Granddaughter Emma visited. Watched a film together." },
+  { id:4, date:'Apr 12', text:"Takes Metformin daily after breakfast." },
+  { id:5, date:'Apr 8',  text:"Favorite song: Moon River by Audrey Hepburn." },
+];
+const TRANSCRIPT = [
+  { who:'robot', text:"Good morning, Jane. How did you sleep?" },
+  { who:'user',  text:"Not too bad. A little stiff." },
+  { who:'robot', text:"Want me to walk you through your morning stretches?" },
+  { who:'user',  text:"Yes, that would be lovely." },
+  { who:'robot', text:"Let's start with shoulder rolls — ten times, nice and slow." },
+  { who:'user',  text:"Okay, doing it now." },
+  { who:'robot', text:"Excellent. And backward now, same count." },
+  { who:'user',  text:"Done. That feels better already." },
+  { who:'robot', text:"Great! Neck stretches next?" },
+];
+
+/* ─── Profile Panel ─── */
+const ProfilePanel = ({ onClose }) => {
+  const sections = [
+    {
+      id: 'profile', label: 'Profile', icon: <Ic size={18} d={<><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></>}/>,
+      content: (
+        <div style={{display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:16,padding:'16px',background:'rgba(255,255,255,0.5)',borderRadius:14,border:'1px solid rgba(0,0,0,0.07)'}}>
+            <div style={{width:52,height:52,borderRadius:'50%',background:'var(--green)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,boxShadow:'0 3px 12px oklch(0.35 0.10 145 / 0.35)'}}>
+              <span style={{fontSize:18,fontWeight:700,color:'white'}}>{PROFILE.initials}</span>
+            </div>
+            <div>
+              <div style={{fontWeight:700,fontSize:16,color:'var(--ink)'}}>{PROFILE.name}</div>
+              <div style={{fontSize:13,color:'var(--ink-3)',marginTop:2}}>jane.smith@example.com</div>
+            </div>
+          </div>
+          {[['Full Name', PROFILE.name],['Date of Birth','March 14, 1951'],['Language','English'],['Timezone','GMT+0 London']].map(([k,v])=>(
+            <div key={k} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid rgba(0,0,0,0.06)'}}>
+              <span style={{fontSize:13,color:'var(--ink-3)',fontWeight:500}}>{k}</span>
+              <span style={{fontSize:14,color:'var(--ink)',fontWeight:500}}>{v}</span>
+            </div>
+          ))}
+          <button style={{marginTop:4,padding:'10px',borderRadius:10,border:'1.5px solid oklch(0.35 0.10 145 / 0.35)',background:'oklch(0.35 0.10 145 / 0.08)',color:'var(--green)',fontFamily:'var(--font)',fontSize:13,fontWeight:600,cursor:'pointer'}}>Edit Profile</button>
+        </div>
+      )
+    },
+    {
+      id: 'account', label: 'Account', icon: <Ic size={18} d={<><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></>}/>,
+      content: (
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {[
+            {label:'Subscription', val:'Elara Premium', badge:'Active'},
+            {label:'Member since', val:'January 2025', badge:null},
+            {label:'Devices linked', val:'2 devices', badge:null},
+          ].map(r=>(
+            <div key={r.label} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'13px 14px',background:'rgba(255,255,255,0.5)',borderRadius:12,border:'1px solid rgba(0,0,0,0.07)'}}>
+              <span style={{fontSize:13,color:'var(--ink-2)',fontWeight:500}}>{r.label}</span>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:13,color:'var(--ink)',fontWeight:600}}>{r.val}</span>
+                {r.badge && <span style={{fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:99,background:'oklch(0.88 0.08 145 / 0.4)',color:'oklch(0.30 0.10 145)'}}>{r.badge}</span>}
+              </div>
+            </div>
+          ))}
+          <div style={{height:4}}/>
+          <button style={{padding:'10px',borderRadius:10,border:'1.5px solid rgba(239,68,68,0.3)',background:'rgba(239,68,68,0.06)',color:'#dc2626',fontFamily:'var(--font)',fontSize:13,fontWeight:600,cursor:'pointer'}}>Sign Out</button>
+        </div>
+      )
+    },
+    {
+      id: 'device', label: 'Device', icon: <Ic size={18} d={<><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18" sw={3}/></>}/>,
+      content: (
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {[
+            {label:'Robot Model', val:'Elara Gen 2'},
+            {label:'Firmware', val:'v2.4.1 — Up to date'},
+            {label:'Serial No.', val:'ELR-20240114-002'},
+            {label:'Last sync', val:'Today, 9:42 AM'},
+            {label:'IP Address', val:'192.168.1.42'},
+          ].map(r=>(
+            <div key={r.label} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid rgba(0,0,0,0.06)'}}>
+              <span style={{fontSize:13,color:'var(--ink-3)',fontWeight:500}}>{r.label}</span>
+              <span style={{fontSize:13,color:'var(--ink)',fontWeight:600,textAlign:'right',maxWidth:'55%'}}>{r.val}</span>
+            </div>
+          ))}
+          <button style={{marginTop:4,padding:'10px',borderRadius:10,border:'1.5px solid rgba(0,0,0,0.12)',background:'rgba(255,255,255,0.5)',color:'var(--ink-2)',fontFamily:'var(--font)',fontSize:13,fontWeight:600,cursor:'pointer'}}>Check for Updates</button>
+        </div>
+      )
+    },
+    {
+      id: 'support', label: 'Support', icon: <Ic size={18} d={<><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17" sw={3}/></>}/>,
+      content: (
+        <div style={{display:'flex',flexDirection:'column',gap:10}}>
+          {[
+            {icon:'📖', title:'User Guide', sub:'Setup, tips & daily use'},
+            {icon:'💬', title:'Live Chat Support', sub:'Mon–Fri, 9am–6pm GMT'},
+            {icon:'📞', title:'Call Us', sub:'+44 800 123 4567'},
+            {icon:'🔒', title:'Privacy & Data', sub:'Manage your data & exports'},
+          ].map(r=>(
+            <button key={r.title} style={{display:'flex',alignItems:'center',gap:14,padding:'14px',borderRadius:12,border:'1px solid rgba(0,0,0,0.07)',background:'rgba(255,255,255,0.5)',cursor:'pointer',textAlign:'left',width:'100%',fontFamily:'var(--font)',transition:'background .15s'}}
+              onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.75)'}
+              onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.5)'}>
+              <span style={{fontSize:22,flexShrink:0}}>{r.icon}</span>
+              <div>
+                <div style={{fontSize:14,fontWeight:600,color:'var(--ink)'}}>{r.title}</div>
+                <div style={{fontSize:12,color:'var(--ink-3)',marginTop:2}}>{r.sub}</div>
+              </div>
+              <svg style={{marginLeft:'auto',color:'var(--ink-3)',flexShrink:0}} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          ))}
+        </div>
+      )
+    },
+  ];
+
+  const [active, setActive] = useState('profile');
+  const current = sections.find(s => s.id === active);
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',alignItems:'stretch',justifyContent:'flex-end',background:'rgba(0,0,0,0.20)',backdropFilter:'blur(6px)'}}
+      onClick={e => e.target===e.currentTarget && onClose()}>
+      <div className="anim-in" style={{width:420,display:'flex',flexDirection:'column',background:'rgba(255,255,255,0.82)',backdropFilter:'blur(40px)',borderLeft:'1px solid rgba(255,255,255,0.7)',boxShadow:'-12px 0 60px rgba(0,0,0,0.12)'}}>
+
+        {/* Header */}
+        <div style={{padding:'22px 24px 16px',borderBottom:'1px solid rgba(0,0,0,0.07)',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:700,letterSpacing:'-0.02em'}}>Settings</div>
+            <div style={{fontSize:13,color:'var(--ink-3)',marginTop:2}}>Manage your profile & device</div>
+          </div>
+          <button onClick={onClose} style={{background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'var(--ink-3)',padding:8,borderRadius:10,display:'flex',transition:'background .15s'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.10)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0.06)'}>
+            <IcX size={18}/>
+          </button>
+        </div>
+
+        {/* Nav tabs */}
+        <div style={{display:'flex',gap:2,padding:'12px 16px',borderBottom:'1px solid rgba(0,0,0,0.07)',flexShrink:0}}>
+          {sections.map(s=>(
+            <button key={s.id} onClick={()=>setActive(s.id)} style={{
+              flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:5,padding:'10px 6px',
+              borderRadius:12,border:'none',cursor:'pointer',fontFamily:'var(--font)',
+              background: active===s.id ? 'oklch(0.35 0.10 145 / 0.10)' : 'transparent',
+              color: active===s.id ? 'var(--green)' : 'var(--ink-3)',
+              transition:'all .18s'
+            }}>
+              {s.icon}
+              <span style={{fontSize:11,fontWeight:600,letterSpacing:'0.02em'}}>{s.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div key={active} className="anim-in" style={{flex:1,overflowY:'auto',padding:'20px 24px'}}>
+          <div style={{fontSize:16,fontWeight:700,letterSpacing:'-0.015em',marginBottom:16,color:'var(--ink)'}}>{current.label}</div>
+          {current.content}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Memories Panel ─── */
+const MemoriesPanel = ({ onClose }) => {
+  const [mems, setMems] = useState(null);
+  useEffect(() => {
+    fetch(`/api/memories/${PROFILE.userId}`).catch(()=>{});
+    setTimeout(() => setMems(MOCK_MEMORIES), 600);
+  }, []);
+
+  return (
+    <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',alignItems:'stretch',justifyContent:'flex-end',background:'rgba(0,0,0,0.20)',backdropFilter:'blur(6px)'}}
+      onClick={e => e.target===e.currentTarget && onClose()}>
+      <div className="anim-in" style={{width:400,display:'flex',flexDirection:'column',background:'rgba(255,255,255,0.82)',backdropFilter:'blur(40px)',borderLeft:'1px solid rgba(255,255,255,0.7)',boxShadow:'-12px 0 60px rgba(0,0,0,0.12)'}}>
+        <div style={{padding:'24px 28px',borderBottom:'1px solid rgba(0,0,0,0.07)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:700,letterSpacing:'-0.02em'}}>Memories</div>
+            <div style={{fontSize:13,color:'var(--ink-3)',marginTop:2}}>What Elara remembers about you</div>
+          </div>
+          <button onClick={onClose} style={{background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'var(--ink-3)',padding:8,borderRadius:10,display:'flex',transition:'background .15s'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.10)'}
+            onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0.06)'}>
+            <IcX size={18}/>
+          </button>
+        </div>
+        <div style={{flex:1,overflowY:'auto',padding:'16px 28px',display:'flex',flexDirection:'column',gap:10}}>
+          {!mems ? (
+            <div style={{display:'flex',alignItems:'center',gap:10,color:'var(--ink-3)',fontSize:14,marginTop:24}}>
+              <div style={{width:16,height:16,border:'2px solid rgba(0,0,0,0.1)',borderTopColor:'var(--green)',borderRadius:'50%',animation:'spin .7s linear infinite'}}/>
+              Loading memories…
+            </div>
+          ) : mems.map(m => (
+            <div key={m.id} style={{padding:'14px 16px',background:'rgba(255,255,255,0.6)',borderRadius:12,border:'1px solid rgba(0,0,0,0.07)',backdropFilter:'blur(8px)'}}>
+              <div style={{fontSize:11,color:'var(--green)',fontWeight:700,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.06em'}}>{m.date}</div>
+              <div style={{fontSize:14,color:'var(--ink)',lineHeight:1.55}}>{m.text}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Header ─── */
+const Header = ({ onMemories, showMemories, onProfile }) => (
+  <header>
+    {/* Logo */}
+    <img src="uploads/elara_green.png" alt="Elara" style={{height:50,width:'auto',objectFit:'contain',objectPosition:'left',marginRight:'auto'}}/>
+
+    {/* Robot connected */}
+    <div style={{display:'flex',alignItems:'center',gap:7,padding:'6px 14px',borderRadius:99,background:'rgba(34,197,94,0.12)',border:'1px solid rgba(34,197,94,0.25)'}}>
+      <div style={{width:7,height:7,borderRadius:'50%',background:'oklch(0.55 0.17 145)',animation:'pulse 2s ease infinite'}}/>
+      <span style={{fontSize:13,fontWeight:600,color:'oklch(0.32 0.12 145)'}}>Robot Connected</span>
+    </div>
+
+    {/* Memories */}
+    <button onClick={onMemories} style={{
+      display:'flex',alignItems:'center',gap:7,padding:'8px 16px',
+      borderRadius:99,border:`1.5px solid ${showMemories ? 'oklch(0.35 0.10 145 / 0.4)' : 'rgba(0,0,0,0.12)'}`,
+      background:showMemories ? 'oklch(0.35 0.10 145 / 0.10)' : 'rgba(255,255,255,0.5)',
+      color:showMemories ? 'var(--green)' : 'var(--ink-2)',
+      cursor:'pointer',fontFamily:'var(--font)',fontSize:13,fontWeight:600,
+      backdropFilter:'blur(8px)',transition:'all .18s'
+    }}>
+      <IcBrain size={15}/> Memories
+    </button>
+
+    {/* Avatar */}
+    <div onClick={onProfile} style={{width:38,height:38,borderRadius:'50%',background:'var(--green)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0,boxShadow:'0 2px 10px oklch(0.35 0.10 145 / 0.35)',transition:'transform .15s, box-shadow .15s'}}
+      onMouseEnter={e=>{e.currentTarget.style.transform='scale(1.08)';e.currentTarget.style.boxShadow='0 4px 16px oklch(0.35 0.10 145 / 0.45)';}}
+      onMouseLeave={e=>{e.currentTarget.style.transform='scale(1)';e.currentTarget.style.boxShadow='0 2px 10px oklch(0.35 0.10 145 / 0.35)';}}>
+      <span style={{fontSize:13,fontWeight:700,color:'white',letterSpacing:'0.02em'}}>{PROFILE.initials}</span>
+    </div>
+  </header>
+);
+
+/* ─── Mode Toggle ─── */
+const ModeToggle = ({ mode, setMode }) => (
+  <div style={{display:'flex',justifyContent:'center',marginBottom:28}}>
+    <div style={{display:'inline-flex',background:'rgba(255,255,255,0.45)',backdropFilter:'blur(16px)',border:'1px solid rgba(255,255,255,0.65)',borderRadius:99,padding:4,gap:4,boxShadow:'0 2px 16px rgba(0,0,0,0.08)'}}>
+      {['Hardware Mode','Browser Chat'].map(m => (
+        <button key={m} onClick={() => setMode(m)} style={{
+          padding:'9px 28px',borderRadius:99,border:'none',cursor:'pointer',
+          background: mode===m ? 'var(--green)' : 'transparent',
+          color: mode===m ? 'white' : 'var(--ink-3)',
+          fontFamily:'var(--font)',fontSize:14,fontWeight:600,
+          boxShadow: mode===m ? '0 2px 14px oklch(0.35 0.10 145 / 0.40)' : 'none',
+          transition:'all .22s'
+        }}>{m}</button>
+      ))}
+    </div>
+  </div>
+);
+
+/* ─── Live Transcript ─── */
+const LiveTranscript = ({ muted }) => {
+  const [lines, setLines] = useState(TRANSCRIPT.slice(0,3));
+  const scrollRef = useRef(); const idxRef = useRef(3);
+  useEffect(() => {
+    if(muted) return;
+    const t = setInterval(() => {
+      if(idxRef.current < TRANSCRIPT.length) setLines(l=>[...l,TRANSCRIPT[idxRef.current++]]);
+      else { idxRef.current=0; setLines([TRANSCRIPT[0]]); }
+    }, 2800);
+    return () => clearInterval(t);
+  },[muted]);
+  useEffect(() => { if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; },[lines]);
+
+  return (
+    <div ref={scrollRef} style={{height:200,overflowY:'auto',padding:'14px 18px',display:'flex',flexDirection:'column',gap:10}}>
+      {lines.map((l,i) => (
+        <div key={i} style={{display:'flex',gap:9,alignItems:'flex-start',opacity:0.65+0.35*(i/lines.length)}}>
+          <div style={{flexShrink:0,width:24,height:24,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
+            background: l.who==='robot' ? 'oklch(0.35 0.10 145 / 0.15)' : 'rgba(0,0,0,0.07)',
+            fontSize:9,fontWeight:700,color: l.who==='robot' ? 'var(--green)' : 'var(--ink-3)'}}>
+            {l.who==='robot' ? 'E' : 'J'}
+          </div>
+          <div style={{fontSize:13.5,color:'var(--ink)',lineHeight:1.55,paddingTop:3}}>{l.text}</div>
+          {i===lines.length-1 && !muted && (
+            <div style={{display:'flex',gap:3,alignItems:'center',paddingTop:10,marginLeft:'auto',flexShrink:0}}>
+              {[0,1,2].map(j=><div key={j} style={{width:3,height:3,borderRadius:'50%',background:'var(--green)',animation:`blink 1.2s ease ${j*0.2}s infinite`}}/>)}
+            </div>
+          )}
+        </div>
+      ))}
+      {muted && <div style={{textAlign:'center',fontSize:13,color:'var(--ink-3)',padding:'16px 0'}}>Microphone muted</div>}
+    </div>
+  );
+};
+
+/* ─── Watch Video ─── */
+const WatchVideo = ({ data }) => {
+  const videoRef = useRef(null);
+  const rafRef = useRef(null);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const stepBack = () => {
+      v.currentTime = Math.max(0.2, v.currentTime - 0.033);
+      if (v.currentTime <= 0.22) { v.currentTime = 0.2; v.play(); }
+      else { rafRef.current = requestAnimationFrame(stepBack); }
+    };
+    const onTimeUpdate = () => { if (v.duration && v.currentTime >= v.duration - 0.2) { v.dispatchEvent(new Event('ended')); } };
+    v.addEventListener('timeupdate', onTimeUpdate);
+    const onEnded = () => { cancelAnimationFrame(rafRef.current); rafRef.current = requestAnimationFrame(stepBack); };
+    v.addEventListener('ended', onEnded);
+    v.addEventListener('timeupdate', onTimeUpdate);
+    v.addEventListener('loadedmetadata', () => { v.currentTime = 0.2; });
+    return () => { v.removeEventListener('ended', onEnded); v.removeEventListener('timeupdate', onTimeUpdate); cancelAnimationFrame(rafRef.current); };
+  }, []);
+
+  return (
+    <div style={{ position: 'relative', width: '100%', aspectRatio: '4/3', borderRadius: 0, overflow: 'hidden', background: '#000' }}>
+      <video ref={videoRef} src="uploads/watch_merge.mp4" autoPlay muted playsInline
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }}/>
+
+      {/* Metrics overlay */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: '16px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Metric icon="❤️" label="Heart Rate" value={data.hr} unit="BPM" alert={data.hr > 100 || data.hr < 55} />
+          <Metric icon="🌡️" label="Temp" value={data.temp} unit="°C" right />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+          <Metric icon="👟" label="Steps" value={data.steps.toLocaleString()} unit="today" />
+          <BatteryMetric value={data.battery} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Metric = ({ icon, label, value, unit, alert, right }) => (
+  <div style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '10px 14px', textAlign: right ? 'right' : 'left', minWidth: 100 }}>
+    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginBottom: 3 }}>{icon} {label}</div>
+    <div style={{ fontSize: 22, fontWeight: 700, color: alert ? '#ff6b6b' : 'white', lineHeight: 1, letterSpacing: '-0.02em' }}>{value}</div>
+    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.40)', marginTop: 2 }}>{unit}</div>
+  </div>
+);
+
+const BatteryMetric = ({ value }) => {
+  const color = value > 50 ? 'oklch(0.72 0.15 145)' : value > 20 ? '#f59e0b' : '#ef4444';
+  return (
+    <div style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, padding: '10px 14px', textAlign: 'right', minWidth: 110 }}>
+      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 500, marginBottom: 6 }}>🔋 Battery</div>
+      <div style={{ height: 7, background: 'rgba(255,255,255,0.15)', borderRadius: 99, overflow: 'hidden', marginBottom: 4 }}>
+        <div style={{ height: '100%', width: `${value}%`, background: color, borderRadius: 99, transition: 'width .5s ease, background .3s' }} />
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 700, color, letterSpacing: '-0.02em' }}>{value}%</div>
+    </div>
+  );
+};
+
+/* ─── Override Modal ─── */
+const OverrideModal = ({ data, onApply, onClose }) => {
+  const [local, setLocal] = useState({ ...data });
+  const set = k => v => setLocal(d => ({ ...d, [k]: v }));
+
+  const params = [
+    { key: 'hr',      label: 'Heart Rate',   unit: 'BPM', min: 40,  max: 180, step: 1,   icon: '❤️' },
+    { key: 'battery', label: 'Battery',      unit: '%',   min: 0,   max: 100, step: 1,   icon: '🔋' },
+    { key: 'steps',   label: 'Step Count',   unit: 'steps',min: 0,  max: 20000,step: 100,icon: '👟' },
+    { key: 'temp',    label: 'Temperature',  unit: '°C',  min: 34,  max: 42,  step: 0.1, icon: '🌡️' },
+  ];
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)' }}
+      onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="anim-in" style={{ width: 440, background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(40px)', border: '1px solid rgba(255,255,255,0.8)', borderRadius: 24, boxShadow: '0 24px 80px rgba(0,0,0,0.18)', overflow: 'hidden' }}>
+
+        {/* Header */}
+        <div style={{ padding: '22px 28px 16px', borderBottom: '1px solid rgba(0,0,0,0.07)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em' }}>Override Simulator</div>
+            <div style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 2 }}>Manually set watch parameters</div>
+          </div>
+          <button onClick={onClose} style={{ background: 'rgba(0,0,0,0.06)', border: 'none', cursor: 'pointer', color: 'var(--ink-3)', padding: 8, borderRadius: 10, display: 'flex' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,0,0,0.10)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(0,0,0,0.06)'}>
+            <IcX size={18} />
+          </button>
+        </div>
+
+        {/* Sliders */}
+        <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {params.map(p => (
+            <div key={p.key}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{p.icon} {p.label}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="number" min={p.min} max={p.max} step={p.step}
+                    value={local[p.key]}
+                    onChange={e => set(p.key)(parseFloat(e.target.value) || p.min)}
+                    style={{ width: 72, padding: '5px 8px', border: '1.5px solid var(--border)', borderRadius: 8, fontFamily: 'var(--font)', fontSize: 14, fontWeight: 600, textAlign: 'center', outline: 'none', color: 'var(--ink)', background: 'rgba(255,255,255,0.7)' }}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--ink-3)', fontWeight: 500 }}>{p.unit}</span>
+                </div>
+              </div>
+              <div style={{ position: 'relative' }}>
+                <input type="range" min={p.min} max={p.max} step={p.step}
+                  value={local[p.key]}
+                  onChange={e => set(p.key)(parseFloat(e.target.value))}
+                  style={{ width: '100%', accentColor: 'var(--green)', height: 5, cursor: 'pointer' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: 'var(--ink-3)' }}>
+                  <span>{p.min}{p.unit === '%' ? '%' : ''}</span>
+                  <span>{p.max}{p.unit === '%' ? '%' : ''}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '0 28px 24px', display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '12px', borderRadius: 12, border: '1.5px solid rgba(0,0,0,0.12)', background: 'rgba(255,255,255,0.6)', color: 'var(--ink-2)', fontFamily: 'var(--font)', fontSize: 14, fontWeight: 600, cursor: 'pointer', transition: 'background .15s' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.9)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.6)'}>
+            Cancel
+          </button>
+          <button onClick={() => { onApply(local); onClose(); }} style={{ flex: 2, padding: '12px', borderRadius: 12, border: 'none', background: 'var(--green)', color: 'white', fontFamily: 'var(--font)', fontSize: 14, fontWeight: 600, cursor: 'pointer', boxShadow: '0 3px 14px oklch(0.35 0.10 145 / 0.35)', transition: 'all .18s', position: 'relative', overflow: 'hidden' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'var(--green-dark)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--green)'; e.currentTarget.style.transform = 'translateY(0)'; }}>
+            Save & Apply
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Hardware Mode ─── */
+const HardwareMode = () => {
+  const [muted, setMuted] = useState(false);
+  const [sleeping, setSleeping] = useState(false);
+  const [view, setView] = useState('watch'); // 'watch' | 'camera'
+  const [showOverride, setShowOverride] = useState(false);
+  const [watchData, setWatchData] = useState({ hr: 72, battery: 82, steps: 4280, temp: 36.6 });
+  const handleSleep = () => { const s = !sleeping; setSleeping(s); setMuted(s); };
+
+  return (
+    <div className="anim-in" style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18,alignItems:'start'}}>
+
+      {/* Watch / Camera panel */}
+      <div className="glass-card" style={{overflow:'hidden'}}>
+        <div style={{padding:'14px 18px 12px',borderBottom:'1px solid rgba(0,0,0,0.06)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:10}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            {view==='watch'
+              ? <span style={{fontSize:15}}>⌚</span>
+              : <IcCamera size={16} style={{color:'var(--green)'}}/>}
+            <span style={{fontSize:14,fontWeight:600}}>{view==='watch' ? 'Companion Watch' : 'OAK-D Vision'}</span>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            {view==='watch' && (
+              <button onClick={()=>setShowOverride(true)} style={{
+                padding:'5px 12px',borderRadius:99,border:'1.5px solid oklch(0.35 0.10 145 / 0.35)',
+                background:'oklch(0.35 0.10 145 / 0.08)',color:'var(--green)',
+                fontFamily:'var(--font)',fontSize:12,fontWeight:600,cursor:'pointer',transition:'all .15s'
+              }}
+                onMouseEnter={e=>{e.currentTarget.style.background='oklch(0.35 0.10 145 / 0.15)';}}
+                onMouseLeave={e=>{e.currentTarget.style.background='oklch(0.35 0.10 145 / 0.08)';}}>
+                ⚙ Override
+              </button>
+            )}
+            {/* View toggle */}
+            <div style={{display:'flex',background:'rgba(0,0,0,0.06)',borderRadius:99,padding:3,gap:2}}>
+              {[['watch','⌚'],['camera','📷']].map(([v,ic])=>(
+                <button key={v} onClick={()=>setView(v)} style={{
+                  padding:'4px 10px',borderRadius:99,border:'none',cursor:'pointer',
+                  background:view===v?'white':'transparent',
+                  fontFamily:'var(--font)',fontSize:12,fontWeight:600,
+                  boxShadow:view===v?'0 1px 4px rgba(0,0,0,0.10)':'none',
+                  transition:'all .18s'
+                }}>{ic}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        {view === 'watch' ? (
+          <WatchVideo data={watchData}/>
+        ) : (
+          <div style={{position:'relative',aspectRatio:'4/3',background:'oklch(0.12 0.01 145)',overflow:'hidden'}}>
+            {sleeping ? (
+              <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:12}}>
+                <IcMoon size={36} style={{color:'oklch(0.40 0.04 145)'}}/>
+                <span style={{fontSize:13,color:'oklch(0.40 0.04 145)',fontWeight:500}}>Robot sleeping</span>
+              </div>
+            ) : (
+              <>
+                <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style={{position:'absolute',inset:0}}>
+                  <defs><pattern id="cg" width="32" height="32" patternUnits="userSpaceOnUse">
+                    <rect width="32" height="32" fill="oklch(0.10 0.01 145)"/>
+                    <rect width="16" height="32" fill="oklch(0.13 0.01 145)"/>
+                  </pattern></defs>
+                  <rect width="100%" height="100%" fill="url(#cg)"/>
+                </svg>
+                <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8}}>
+                  <IcCamera size={32} style={{color:'oklch(0.28 0.03 145)'}}/>
+                  <span style={{fontSize:11,color:'oklch(0.30 0.03 145)',fontWeight:500,fontFamily:'monospace'}}>oak-d camera feed</span>
+                </div>
+                {[0,1,2,3].map(i=>(
+                  <div key={i} style={{position:'absolute',
+                    top:i<2?14:'auto',bottom:i>=2?14:'auto',
+                    left:i%2===0?14:'auto',right:i%2!==0?14:'auto',
+                    width:18,height:18,
+                    borderTop:i<2?'2px solid oklch(0.35 0.10 145)':'none',
+                    borderBottom:i>=2?'2px solid oklch(0.35 0.10 145)':'none',
+                    borderLeft:i%2===0?'2px solid oklch(0.35 0.10 145)':'none',
+                    borderRight:i%2!==0?'2px solid oklch(0.35 0.10 145)':'none',
+                    opacity:0.6}}/>
+                ))}
+                <div style={{position:'absolute',top:12,right:12,display:'flex',alignItems:'center',gap:5,padding:'3px 8px',borderRadius:99,background:'rgba(0,0,0,0.55)'}}>
+                  <div style={{width:6,height:6,borderRadius:'50%',background:'#ef4444',animation:'pulse 1.5s ease infinite'}}/>
+                  <span style={{fontSize:9,fontWeight:700,color:'white',letterSpacing:'0.06em'}}>REC</span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {showOverride && <OverrideModal data={watchData} onApply={setWatchData} onClose={()=>setShowOverride(false)}/>}
+
+      {/* Right column */}
+      <div style={{display:'flex',flexDirection:'column',gap:14}}>
+
+        {/* Transcript */}
+        <div className="glass-card">
+          <div style={{padding:'16px 20px 12px',borderBottom:'1px solid rgba(0,0,0,0.06)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <IcWave size={16} style={{color:'var(--green)'}}/>
+              <span style={{fontSize:14,fontWeight:600}}>Live Transcript</span>
+            </div>
+            {muted && <span style={{fontSize:12,fontWeight:600,padding:'3px 9px',borderRadius:99,background:'rgba(0,0,0,0.07)',color:'var(--ink-3)'}}>Muted</span>}
+          </div>
+          <LiveTranscript muted={muted}/>
+        </div>
+
+        {/* Controls */}
+        <div className="glass-card" style={{padding:'18px 20px'}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--ink-3)',marginBottom:12,textTransform:'uppercase',letterSpacing:'0.07em'}}>Robot Controls</div>
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>setMuted(m=>!m)} style={{
+              flex:1,padding:'11px',borderRadius:10,
+              border:`1.5px solid ${muted?'oklch(0.35 0.10 145 / 0.4)':'rgba(0,0,0,0.10)'}`,
+              background:muted?'oklch(0.35 0.10 145 / 0.10)':'rgba(255,255,255,0.5)',
+              color:muted?'var(--green)':'var(--ink-2)',
+              cursor:'pointer',fontFamily:'var(--font)',fontSize:13,fontWeight:600,
+              display:'flex',alignItems:'center',justifyContent:'center',gap:7,
+              backdropFilter:'blur(8px)',transition:'all .18s',borderRadius:10
+            }}>
+              <IcMic size={14} off={muted}/>{muted?'Unmute Mic':'Mute Mic'}
+            </button>
+            <button onClick={handleSleep} style={{
+              flex:1,padding:'11px',
+              border:`1.5px solid ${sleeping?'oklch(0.55 0.10 55 / 0.4)':'rgba(0,0,0,0.10)'}`,
+              background:sleeping?'oklch(0.96 0.04 55 / 0.5)':'rgba(255,255,255,0.5)',
+              color:sleeping?'oklch(0.38 0.10 55)':'var(--ink-2)',
+              cursor:'pointer',fontFamily:'var(--font)',fontSize:13,fontWeight:600,
+              display:'flex',alignItems:'center',justifyContent:'center',gap:7,
+              backdropFilter:'blur(8px)',transition:'all .18s',borderRadius:10
+            }}>
+              <IcMoon size={14}/>{sleeping?'Wake Up':'Sleep Mode'}
+            </button>
+          </div>
+        </div>
+
+        {/* System status */}
+        <div className="glass-card" style={{padding:'18px 20px'}}>
+          <div style={{fontSize:11,fontWeight:700,color:'var(--ink-3)',marginBottom:14,textTransform:'uppercase',letterSpacing:'0.07em'}}>System Status</div>
+          {[{label:'Battery',val:82,c:'oklch(0.50 0.15 145)'},{label:'WiFi Signal',val:95,c:'var(--green)'},{label:'Camera',val:100,c:'var(--green)'}].map(s=>(
+            <div key={s.label} style={{marginBottom:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:5,fontSize:13}}>
+                <span style={{color:'var(--ink-2)',fontWeight:500}}>{s.label}</span>
+                <span style={{color:'var(--ink-3)',fontWeight:600}}>{s.val}%</span>
+              </div>
+              <div style={{height:5,background:'rgba(0,0,0,0.07)',borderRadius:99,overflow:'hidden'}}>
+                <div style={{height:'100%',width:`${s.val}%`,background:s.c,borderRadius:99,transition:'width .6s ease'}}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Browser Chat ─── */
+const BrowserChatMode = () => {
+  const [messages, setMessages] = useState([
+    { role:'assistant', text:"Hi Jane! I'm Elara. How can I help you today?", ts:new Date() }
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef();
+
+  useEffect(() => { if(scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; },[messages]);
+
+  const send = async () => {
+    const txt = input.trim();
+    if(!txt || loading) return;
+    setInput('');
+    setMessages(m=>[...m,{role:'user',text:txt,ts:new Date()}]);
+    setLoading(true);
+    try {
+      const res = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:txt,userId:PROFILE.userId})}).catch(()=>null);
+      let reply;
+      if(res && res.ok) { const d = await res.json().catch(()=>null); reply = d?.text || d?.reply; }
+      if(!reply) {
+        await new Promise(r=>setTimeout(r,800+Math.random()*600));
+        reply = ["That sounds lovely. Tell me more.","I'll make a note of that.","Of course! Happy to help.","Shall we plan it together?","I hear you. Want me to remind you later?"][Math.floor(Math.random()*5)];
+      }
+      setMessages(m=>[...m,{role:'assistant',text:reply,ts:new Date()}]);
+    } finally { setLoading(false); }
+  };
+
+  const fmt = ts => ts.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+
+  return (
+    <div className="anim-in" style={{display:'flex',flexDirection:'column',gap:12,height:'calc(100vh - var(--header-h) - 130px)',minHeight:420}}>
+      {/* Banner */}
+      <div style={{
+        background:'oklch(0.96 0.05 55 / 0.65)',border:'1px solid oklch(0.88 0.07 55 / 0.6)',
+        borderRadius:12,padding:'10px 16px',backdropFilter:'blur(12px)',
+        display:'flex',alignItems:'center',gap:10,fontSize:13,fontWeight:500,color:'oklch(0.38 0.10 55)',flexShrink:0
+      }}>
+        <IcMic size={14} off={true} style={{color:'oklch(0.48 0.10 55)'}}/>
+        Hardware microphone muted. Chatting via PC.
+      </div>
+
+      {/* Chat area */}
+      <div className="glass-card-strong" style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+        <div ref={scrollRef} style={{flex:1,overflowY:'auto',padding:'22px 24px',display:'flex',flexDirection:'column',gap:14}}>
+          {messages.map((m,i)=>(
+            <div key={i} style={{display:'flex',flexDirection:m.role==='user'?'row-reverse':'row',gap:9,alignItems:'flex-end'}}>
+              {m.role==='assistant' && (
+                <div style={{width:30,height:30,borderRadius:'50%',background:'var(--green)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginBottom:2,boxShadow:'0 2px 8px oklch(0.35 0.10 145 / 0.30)'}}>
+                  <span style={{fontSize:10,fontWeight:700,color:'white'}}>E</span>
+                </div>
+              )}
+              <div style={{maxWidth:'66%',display:'flex',flexDirection:'column',gap:3,alignItems:m.role==='user'?'flex-end':'flex-start'}}>
+                <div style={{
+                  padding:'12px 15px',
+                  borderRadius:m.role==='user'?'18px 18px 4px 18px':'18px 18px 18px 4px',
+                  background:m.role==='user'?'var(--green)':'rgba(255,255,255,0.70)',
+                  backdropFilter:m.role==='user'?'none':'blur(8px)',
+                  border:m.role==='user'?'none':'1px solid rgba(255,255,255,0.6)',
+                  color:m.role==='user'?'white':'var(--ink)',
+                  fontSize:14.5,lineHeight:1.55,
+                  boxShadow:m.role==='user'?'0 2px 12px oklch(0.35 0.10 145 / 0.25)':'0 1px 8px rgba(0,0,0,0.06)'
+                }}>{m.text}</div>
+                <div style={{fontSize:11,color:'var(--ink-3)',padding:'0 4px'}}>{fmt(m.ts)}</div>
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div style={{display:'flex',gap:9,alignItems:'flex-end'}}>
+              <div style={{width:30,height:30,borderRadius:'50%',background:'var(--green)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <span style={{fontSize:10,fontWeight:700,color:'white'}}>E</span>
+              </div>
+              <div style={{padding:'12px 18px',borderRadius:'18px 18px 18px 4px',background:'rgba(255,255,255,0.70)',backdropFilter:'blur(8px)',border:'1px solid rgba(255,255,255,0.6)',display:'flex',gap:4,alignItems:'center'}}>
+                {[0,1,2].map(j=><div key={j} style={{width:6,height:6,borderRadius:'50%',background:'var(--ink-3)',animation:`blink 1.2s ease ${j*0.2}s infinite`}}/>)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Input bar */}
+        <div style={{borderTop:'1px solid rgba(0,0,0,0.07)',padding:'14px 18px',display:'flex',gap:10,alignItems:'flex-end',background:'rgba(255,255,255,0.30)',backdropFilter:'blur(8px)'}}>
+          <textarea
+            value={input}
+            onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>{ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} }}
+            placeholder="Message Elara…"
+            rows={1}
+            className="field-input"
+            style={{flex:1,resize:'none',maxHeight:110,overflowY:'auto',lineHeight:1.5}}
+            onFocus={e=>{e.target.style.borderColor='var(--green)';e.target.style.boxShadow='0 0 0 3px oklch(0.35 0.10 145 / 0.12)';}}
+            onBlur={e=>{e.target.style.borderColor='rgba(0,0,0,0.12)';e.target.style.boxShadow='none';}}
+          />
+          <button onClick={send} disabled={!input.trim()||loading} className="btn-primary" style={{width:44,height:44,padding:0,flexShrink:0}}>
+            {loading ? <div className="spinner"/> : <IcSend size={16}/>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── App ─── */
+const App = () => {
+  const [mode, setMode] = useState('Hardware Mode');
+  const [showMemories, setShowMemories] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+
+  return (
+    <>
+      <div className="app-shell">
+        <Header onMemories={()=>setShowMemories(s=>!s)} showMemories={showMemories} onProfile={()=>setShowProfile(s=>!s)}/>
+        <main>
+          <div style={{marginBottom:28}}>
+            <h1 style={{fontSize:'clamp(20px,2.2vw,30px)',fontWeight:700,letterSpacing:'-0.03em',color:'var(--ink)'}}>
+              Good morning, {PROFILE.name.split(' ')[0]}. 👋
+            </h1>
+            <p style={{fontSize:14,color:'var(--ink-3)',marginTop:5}}>
+              Saturday, April 26 · Elara is active and listening.
+            </p>
+          </div>
+          <ModeToggle mode={mode} setMode={setMode}/>
+          {mode === 'Hardware Mode' ? <HardwareMode/> : <BrowserChatMode/>}
+        </main>
+      </div>
+      {showMemories && <MemoriesPanel onClose={()=>setShowMemories(false)}/>}
+      {showProfile && <ProfilePanel onClose={()=>setShowProfile(false)}/>}
+    </>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

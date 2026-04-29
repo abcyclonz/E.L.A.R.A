@@ -57,6 +57,13 @@ def log_raw(db: Session, speaker: str, raw_text: str,
     })
 
 
+_GROUNDING_IMPORTANCE_THRESHOLD = 0.85
+
+
+def _is_grounding(importance: float, stability: str) -> bool:
+    return importance >= _GROUNDING_IMPORTANCE_THRESHOLD and stability == "permanent"
+
+
 def write_state(db: Session, claim: ExtractedClaim,
                 emotion: str = None, speaker_id: str = "user"):
     db.execute(text("""
@@ -69,18 +76,19 @@ def write_state(db: Session, claim: ExtractedClaim,
     db.execute(text("""
         INSERT INTO state_memory
                (entity, attribute, value, confidence, emotion,
-                importance, stability, speaker_id)
+                importance, stability, speaker_id, is_grounding)
         VALUES (:entity, :attribute, :value, :confidence, :emotion,
-                :importance, :stability, :speaker_id)
+                :importance, :stability, :speaker_id, :is_grounding)
     """), {
-        "entity":     claim.entity,
-        "attribute":  claim.attribute,
-        "value":      claim.value,
-        "confidence": claim.confidence,
-        "emotion":    emotion,
-        "importance": claim.importance,
-        "stability":  claim.stability,
-        "speaker_id": speaker_id,
+        "entity":       claim.entity,
+        "attribute":    claim.attribute,
+        "value":        claim.value,
+        "confidence":   claim.confidence,
+        "emotion":      emotion,
+        "importance":   claim.importance,
+        "stability":    claim.stability,
+        "speaker_id":   speaker_id,
+        "is_grounding": _is_grounding(claim.importance, claim.stability),
     })
 
 
@@ -98,18 +106,19 @@ def write_belief(db: Session, claim: ExtractedClaim, speaker_id: str = "user"):
     db.execute(text("""
         INSERT INTO belief_memory
                (observer, entity_or_event, attribute, value, confidence,
-                importance, stability, speaker_id)
+                importance, stability, speaker_id, is_grounding)
         VALUES (:observer, :entity_or_event, :attribute, :value, :confidence,
-                :importance, :stability, :speaker_id)
+                :importance, :stability, :speaker_id, :is_grounding)
     """), {
-        "observer":      claim.observer,
+        "observer":        claim.observer,
         "entity_or_event": claim.entity_or_event,
-        "attribute":     claim.attribute,
-        "value":         claim.value,
-        "confidence":    claim.confidence,
-        "importance":    claim.importance,
-        "stability":     claim.stability,
-        "speaker_id":    speaker_id,
+        "attribute":       claim.attribute,
+        "value":           claim.value,
+        "confidence":      claim.confidence,
+        "importance":      claim.importance,
+        "stability":       claim.stability,
+        "speaker_id":      speaker_id,
+        "is_grounding":    _is_grounding(claim.importance, claim.stability),
     })
 
 
@@ -392,6 +401,45 @@ def rerank_by_relevance(
     result = [s for score, s in combined if score >= SALIENCE_THRESHOLD]
     print(f"[Rerank] {len(states)} → {len(result)} after LLM relevance filter")
     return result
+
+
+# ── Grounding facts ─────────────────────────────────────────────────────────
+
+def get_grounding_facts(db: Session, speaker_id: str = "user") -> list:
+    """
+    Return all grounding-flagged facts for a speaker.
+    These are high-importance permanent facts (mom passed away, children, etc.)
+    that should always be present in Elara's context regardless of topic.
+    No salience filtering — grounding facts never decay out of context.
+    """
+    state_rows = db.execute(text("""
+        SELECT entity, attribute, value, emotion
+        FROM state_memory
+        WHERE is_grounding = TRUE AND speaker_id = :speaker_id AND valid_to IS NULL
+        ORDER BY importance DESC
+    """), {"speaker_id": speaker_id}).fetchall()
+
+    belief_rows = db.execute(text("""
+        SELECT entity_or_event, attribute, value, NULL as emotion
+        FROM belief_memory
+        WHERE is_grounding = TRUE AND speaker_id = :speaker_id AND valid_to IS NULL
+        ORDER BY importance DESC
+    """), {"speaker_id": speaker_id}).fetchall()
+
+    results = []
+    for r in state_rows:
+        results.append({
+            "source": "state",
+            "entity": r[0], "attribute": r[1],
+            "value": r[2], "emotion": r[3],
+        })
+    for r in belief_rows:
+        results.append({
+            "source": "belief",
+            "entity": r[0], "attribute": r[1],
+            "value": r[2], "emotion": None,
+        })
+    return results
 
 
 # ── Episodic memory ─────────────────────────────────────────────────────────

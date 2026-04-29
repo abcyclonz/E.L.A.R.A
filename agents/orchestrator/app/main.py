@@ -9,10 +9,10 @@ from app.models import AgentInput, OrchestrationResult
 from app.agents import (
     route, store_and_retrieve, retrieve_only, elara_chat,
     detect_style_frustration, maybe_summarize, run_tool,
-    store_episode, recall_episodes,
+    store_episode, recall_episodes, fetch_grounding, _location_from_grounding,
     _GREETING_RE, _AFFIRMATION_RE,
 )
-from app import auth
+from app import auth, cache
 from app.config import settings
 
 
@@ -62,6 +62,7 @@ class ChatRequest(BaseModel):
     session_id: str          # == user_id from auth
     user_input: str
     user_token: str
+    location: Optional[str] = None  # GPS-derived city string from browser, e.g. "Trivandrum, Kerala"
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +163,7 @@ def chat_endpoint(req: ChatRequest):
         speaker=speaker_id,
         emotion=None,
         scene=None,
+        metadata={"location": req.location} if req.location else {},
     )
     result = handle_input(agent_input)
 
@@ -241,6 +243,14 @@ def handle_input(req: AgentInput):
     tool_called      = None
     speaker_id       = req.speaker or "user"
 
+    # Fetch grounding facts once per turn — always present in Elara's context.
+    grounding_facts = fetch_grounding(speaker_id)
+
+    # Derive user location: GPS city from request metadata (web frontend) OR memory-stored location.
+    user_location = (req.metadata or {}).get("location") or _location_from_grounding(grounding_facts)
+    if user_location:
+        print(f"[Location] Using: {user_location}")
+
     # ── Step 1: Implicit style frustration check ───────────────────────────
     emotion = req.emotion
     if not emotion or emotion.lower() in ("none", "normal", "neutral", "unknown"):
@@ -252,15 +262,21 @@ def handle_input(req: AgentInput):
     from app.agents import RouteDecision
     text_lower = req.text.strip().lower()
 
-    # Gratitude affirmations ("thanks", "thank you", "cheers") → simple canned reply.
-    # Mistral reliably fails these by narrating its own system prompt instead.
+    # Fetch current session history so the router has conversational context.
+    _current_session = cache.get_session(speaker_id)
+    _recent_turns = _current_session.get("history", [])[-4:] if _current_session else []
+
+    # Gratitude affirmations → simple canned reply (small LLMs hallucinate on these).
+    # Matches messages that START with a gratitude phrase and are short (≤10 words).
     _GRATITUDE_RE = re.compile(
-        r"^\s*(thanks|thank you|thank u|cheers|ta)\s*[!.?]?\s*$", re.IGNORECASE
+        r"^\s*(thanks|thank you|thank u|cheers|ta)\b",
+        re.IGNORECASE,
     )
-    if _GRATITUDE_RE.match(req.text.strip()):
+    if _GRATITUDE_RE.match(req.text.strip()) and len(req.text.split()) <= 10:
         elara_result = elara_chat(
             user_text=req.text, snapshot=None, emotion=emotion,
             speaker_id=speaker_id, scene=req.scene, reset_history=False,
+            grounding_facts=grounding_facts,
         )
         return OrchestrationResult(
             reply="You're welcome! Is there anything else I can help you with?",
@@ -269,12 +285,85 @@ def handle_input(req: AgentInput):
             debug={"router_action": "DIRECT_CHAT", "router_reason": "gratitude affirmation"},
         )
 
+    # Reminder keyword short-circuits — small LLMs frequently mis-route these to STORE_MEMORY.
+    _REMINDER_SET_RE = re.compile(
+        r"\b(remind me|set a reminder|don.?t let me forget|"
+        r"add a reminder|create a reminder|make a reminder)\b",
+        re.IGNORECASE,
+    )
+    _REMINDER_LIST_RE = re.compile(
+        r"\b(what reminders|list (my )?reminders|show (my )?reminders|"
+        r"do i have (any )?reminders|my reminders|check (my )?reminders)\b",
+        re.IGNORECASE,
+    )
+
+    # Elara-complaint messages → DIRECT_CHAT (small LLMs route these to STORE_MEMORY).
+    _ELARA_COMPLAINT_RE = re.compile(
+        r"\b(i already told you|you never remember|you.?re not listening|"
+        r"why do you keep|stop (talking|saying|asking)|you already asked|"
+        r"i.?ve said this|you.?re repeating|you don.?t listen)\b",
+        re.IGNORECASE,
+    )
+
+    # Memory retrieval questions → RETRIEVE_MEMORY (small LLMs mis-route these to STORE_MEMORY).
+    _MEMORY_QUESTION_RE = re.compile(
+        r"^\s*(do you remember\b|can you recall\b|what do you (know|remember) about me\b|"
+        r"what (have|did) i (tell|told) you\b|tell me what you (know|remember)\b|"
+        r"do you know (my|what i|where my|when i)\b)",
+        re.IGNORECASE,
+    )
+
+    # Elara-opinion questions → DIRECT_CHAT (asking Elara's view, not user stating a fact).
+    _ELARA_OPINION_RE = re.compile(
+        r"^\s*what do you (think|feel|reckon) (of|about|regarding)\b",
+        re.IGNORECASE,
+    )
+
+    # Apologies / social recoveries → DIRECT_CHAT (nothing worth storing).
+    _APOLOGY_RE = re.compile(
+        r"^\s*(sorry[,.]?\s+(i (didn.?t|just|am|was)|i.?m)|"
+        r"i.?m sorry[,.]?\s+i\b|i apologize[,.]|forgive me[,.] i)\b",
+        re.IGNORECASE,
+    )
+
+    # Positive social feedback about Elara → DIRECT_CHAT.
+    _SOCIAL_POSITIVE_RE = re.compile(
+        r"\b(good|great|wonderful|helpful|lovely|nice|brilliant) (company|companion|friend|assistant)\b|"
+        r"\bi (really )?(enjoy|like|love) (talking|chatting|speaking) (to|with) you\b",
+        re.IGNORECASE,
+    )
+
+    # Greetings → DIRECT_CHAT, skip memory entirely (also triggers history reset).
+    if _GREETING_RE.match(req.text.strip()):
+        decision = RouteDecision("DIRECT_CHAT", "greeting")
+        print("[Orchestrator] Greeting short-circuit → DIRECT_CHAT")
     # Short-circuit for other single-word affirmations: always DIRECT_CHAT, no memory.
-    if _AFFIRMATION_RE.match(req.text.strip()):
+    elif _AFFIRMATION_RE.match(req.text.strip()):
         decision = RouteDecision("DIRECT_CHAT", "short affirmation")
         print("[Orchestrator] Affirmation short-circuit → DIRECT_CHAT")
+    elif _REMINDER_SET_RE.search(req.text):
+        decision = RouteDecision("USE_TOOL", "reminder keyword", tool="reminder")
+        print("[Orchestrator] Reminder short-circuit → USE_TOOL | reminder")
+    elif _REMINDER_LIST_RE.search(req.text):
+        decision = RouteDecision("USE_TOOL", "list reminders keyword", tool="reminder")
+        print("[Orchestrator] List-reminders short-circuit → USE_TOOL | reminder")
+    elif _ELARA_COMPLAINT_RE.search(req.text):
+        decision = RouteDecision("DIRECT_CHAT", "Elara complaint — handle empathetically")
+        print("[Orchestrator] Complaint short-circuit → DIRECT_CHAT")
+    elif _MEMORY_QUESTION_RE.match(req.text.strip()):
+        decision = RouteDecision("RETRIEVE_MEMORY", "memory retrieval question")
+        print("[Orchestrator] Memory question short-circuit → RETRIEVE_MEMORY")
+    elif _ELARA_OPINION_RE.match(req.text.strip()):
+        decision = RouteDecision("DIRECT_CHAT", "Elara-directed opinion question")
+        print("[Orchestrator] Opinion question short-circuit → DIRECT_CHAT")
+    elif _APOLOGY_RE.match(req.text.strip()):
+        decision = RouteDecision("DIRECT_CHAT", "apology / social recovery")
+        print("[Orchestrator] Apology short-circuit → DIRECT_CHAT")
+    elif _SOCIAL_POSITIVE_RE.search(req.text):
+        decision = RouteDecision("DIRECT_CHAT", "positive social feedback")
+        print("[Orchestrator] Social positive short-circuit → DIRECT_CHAT")
     else:
-        decision = route(req.text, emotion)
+        decision = route(req.text, emotion, recent_turns=_recent_turns)
     print(f"[Orchestrator] Route → {decision.action} | {decision.reason}")
 
     # ── Step 3: Execute the routed action ─────────────────────────────────
@@ -301,7 +390,7 @@ def handle_input(req: AgentInput):
 
     elif decision.action == "USE_TOOL":
         tool_called = decision.tool
-        tool_result = run_tool(tool_called, req.text, speaker_id)
+        tool_result = run_tool(tool_called, req.text, speaker_id, recent_turns=_recent_turns, user_location=user_location)
         print(f"[Orchestrator] Tool result: {tool_result}")
         # Pass tool output to Elara as memory context so it can formulate the reply
         snapshot = {"tool_result": tool_result, "active_states": [], "relevant_beliefs": [], "recent_events": []}
@@ -333,6 +422,7 @@ def handle_input(req: AgentInput):
         scene=req.scene,
         reset_history=bool(_GREETING_RE.match(req.text.strip())),
         episodes=episodes,
+        grounding_facts=grounding_facts,
     )
 
     # ── Step 5: Store this turn as an episode (episodic memory) ──────────

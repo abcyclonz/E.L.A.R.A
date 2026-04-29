@@ -28,6 +28,10 @@ LLM-Agent-For--elders-main/
 # Bandit lock files
 agents/elara/tables/.bandit.lock
 
+# Google OAuth secrets — never commit these
+agents/tools/assistant/google_auth/credentials.json
+agents/tools/assistant/google_auth/token.json
+
 # Logs
 *.log
 CLAUDE.md

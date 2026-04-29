@@ -47,21 +47,41 @@ _TOOL_SCHEMAS: dict[str, str] = {
 _PARAMS_PROMPT = """Extract the parameters for the tool call from the user's message.
 
 Tool: {tool_name}
+{context_block}{location_line}Current date and time: {now_str}
 User message: "{text}"
 Required JSON schema: {schema}
 
 Rules:
 - Output ONLY valid JSON. No explanation.
 - If a field cannot be determined, use a sensible default or empty string.
-- For "when" fields, preserve the exact time expression the user said (e.g. "8pm tonight", "next Monday").
+- For "when" fields, resolve relative expressions using the current date above.
+  Examples: "tomorrow evening" → the actual date + "6:00 PM", "next Monday" → the actual Monday date.
+  Write the resolved value in plain English (e.g. "29 April 2026 at 6:00 PM") so dateparser can parse it.
+- For "query" fields, if the user's message is vague (e.g. "search up nearby me"), use the
+  Recent conversation context above to infer WHAT they want to search for.
+- If a "User's current location" is provided above, always use it to make the query location-specific
+  (e.g. "coffee shops in Trivandrum, Kerala" instead of "coffee shops near me").
 
 JSON:"""
 
 
-def extract_tool_params(tool_name: str, user_text: str) -> dict:
+def extract_tool_params(tool_name: str, user_text: str, recent_turns: list = None, user_location: str = None) -> dict:
     """Use LLM to pull structured params from free-form user text."""
     schema = _TOOL_SCHEMAS.get(tool_name, '{"query": "<user message>"}')
-    prompt = _PARAMS_PROMPT.format(tool_name=tool_name, text=user_text, schema=schema)
+    context_block = ""
+    if recent_turns:
+        lines = []
+        for t in recent_turns[-4:]:
+            role = t.get("role", "unknown").capitalize()
+            content = t.get("content", "")[:200]
+            lines.append(f"  {role}: {content}")
+        context_block = "Recent conversation:\n" + "\n".join(lines) + "\n"
+    location_line = f"User's current location: {user_location}\n" if user_location else ""
+    now_str = datetime.now(timezone.utc).astimezone().strftime("%A, %d %B %Y, %I:%M %p")
+    prompt = _PARAMS_PROMPT.format(
+        tool_name=tool_name, text=user_text, schema=schema,
+        context_block=context_block, location_line=location_line, now_str=now_str
+    )
     try:
         response = requests.post(
             f"{settings.ollama_url}/api/generate",
@@ -100,7 +120,10 @@ STORE_MEMORY — user is asserting/stating personal facts, relationships, feelin
 RETRIEVE_MEMORY — user is asking whether you remember personal details they previously shared.
   Only for questions about THEIR OWN personal history, NOT general world knowledge.
   YES: "do you know my son's name?", "do you remember what I told you?",
-       "what do you know about my neighbour?", "do you remember my family?"
+       "what do you know about my neighbour?", "do you remember my family?",
+       "do you know where I am?", "do you know my location?", "where do you think I am?",
+       "what do you know about me?", "what do you know about me so far?",
+       "do you remember my name?", "what have I told you?", "tell me what you remember about me"
   NO:  "do you know the capital of France", "what are the states of Kerala"
 
 STORE_AND_RETRIEVE — user is correcting or updating previously stored personal information.
@@ -108,8 +131,36 @@ STORE_AND_RETRIEVE — user is correcting or updating previously stored personal
 
 USE_TOOL — use for ALL of these:
   (a) Questions about world facts, geography, science, history, news, weather, or current events
-  (b) Explicit search requests: "search it", "search that", "look it up", "find out", "search [topic]"
+  (b) Explicit search requests — user is asking ELARA to search or find something external.
+      YES: "search it", "search that", "look it up", "find out", "search [topic]",
+           "can you search", "can you search up", "look that up", "find me X", "find nearby",
+           "can you find", "look for nearby", "search nearby", "look it up for me"
+      NO:  "I need to search X tomorrow" → user stating their OWN plan → STORE_MEMORY
+           "I want to search for X" → user's own intention → STORE_MEMORY
+           "I'm going to look up X" → user's own plan → STORE_MEMORY
+      Key rule: only USE_TOOL when the user is directing ELARA to search, not when they describe
+      their own future action.
   (c) Reminders and calendar requests
+  (d) Corrections or clarifications to a PREVIOUS search/tool request — check Recent conversation.
+      If the prior turn used a tool (web_search, calendar, reminder) and the user is now
+      correcting or refining that request, re-route to USE_TOOL with the SAME tool.
+      YES: "oh sorry I meant restaurants" (after a hotel search) → USE_TOOL | web_search
+           "no I meant near Trivandrum" (after a location search) → USE_TOOL | web_search
+           "actually search for Italian restaurants" → USE_TOOL | web_search
+           "I meant next Tuesday not Monday" (after a calendar add) → USE_TOOL | calendar
+  (e) Implicit nearby-search: user wants or needs a specific tangible object, food, or service.
+      Rule: "want/need [NOUN or food/drink/service]" → USE_TOOL | web_search
+      Also covers hunger, food cravings, and vague eating intent.
+      "want to [VERB]" or pure emotion statements are NOT this — leave them as STORE_MEMORY.
+      YES: "I want a coffee so bad", "I need a taxi", "I want some pizza",
+           "I could really use a doctor", "I need a pharmacy", "I want some tea",
+           "I want something to eat", "I'm hungry", "I feel like eating something",
+           "I could do with a bite", "I want food", "I need something to eat"
+      NO:  "I want to sleep" → STORE_MEMORY
+           "I want my kids to visit" → STORE_MEMORY
+           "I feel like crying" → STORE_MEMORY
+           "I want peace" → STORE_MEMORY
+           "I want to live in Kerala" → STORE_MEMORY
   Available tools:
 {_TOOLS_LIST}
   YES: "what are the districts of Kerala?", "search it", "search Kerala",
@@ -117,10 +168,28 @@ USE_TOOL — use for ALL of these:
        "how many states does India have", "who is the prime minister", "look that up"
   Format: USE_TOOL | tool_name | reason
 
-DIRECT_CHAT — greetings, small talk, questions TO ELARA, or simple replies that need nothing else.
-  YES: "hey", "how are you", "tell me a joke", "ok", "thanks", "what's your name", "that's nice"
+DIRECT_CHAT — greetings, small talk, questions TO ELARA, reactions, or simple replies that need nothing else.
+  YES: "hey", "how are you", "tell me a joke", "ok", "thanks", "what's your name", "that's nice",
+       "how have you been", "how are you doing", "what have you been up to", "how's your day",
+       "are you okay", "what do you think", "do you like X", "tell me about yourself"
 
-User message: "{{text}}"
+  ALSO DIRECT_CHAT — complaints about ELARA's behaviour (not a personal fact, just feedback):
+    "I already told you this", "you never remember anything I say", "you're not listening to me",
+    "why do you keep talking about hospitals", "stop repeating yourself", "you already asked that"
+
+  ALSO DIRECT_CHAT — positive reactions directed at ELARA (not storable personal facts):
+    "you're great", "haha you're funny", "you're good company", "that made me laugh",
+    "you're very helpful", "I like talking to you"
+
+  ALSO DIRECT_CHAT — casual environmental observations with no storable personal fact:
+    "it's a lovely day", "the weather is nice today", "what a beautiful evening",
+    "the garden looks beautiful", "it's raining outside"
+
+  ALSO DIRECT_CHAT — watching/doing something right now (transient activity, not a personal fact):
+    "I'm watching the cricket", "India did well today", "just had my tea",
+    "I'm sitting in the garden", "watching telly"
+
+{{recent_context}}User message: "{{text}}"
 Detected emotion: {{emotion}}
 
 Output exactly ONE line:
@@ -140,9 +209,22 @@ class RouteDecision:
     tool: Optional[str] = None
 
 
-def route(text: str, emotion: str = None) -> RouteDecision:
-    """LLM-based router. Falls back to STORE_MEMORY on failure."""
-    prompt = ROUTER_PROMPT.format(text=text, emotion=emotion or "none")
+def _fmt_recent_turns(turns: list) -> str:
+    """Format the last 4 history entries as a brief context block for the router."""
+    if not turns:
+        return ""
+    lines = []
+    for t in turns[-4:]:
+        role = t.get("role", "unknown").capitalize()
+        content = t.get("content", "")[:200]
+        lines.append(f"  {role}: {content}")
+    return "Recent conversation:\n" + "\n".join(lines) + "\n\n"
+
+
+def route(text: str, emotion: str = None, recent_turns: list = None) -> RouteDecision:
+    """LLM-based router. Falls back to DIRECT_CHAT on failure."""
+    recent_context = _fmt_recent_turns(recent_turns or [])
+    prompt = ROUTER_PROMPT.format(text=text, emotion=emotion or "none", recent_context=recent_context)
     try:
         response = requests.post(
             f"{settings.ollama_url}/api/generate",
@@ -180,7 +262,7 @@ def route(text: str, emotion: str = None) -> RouteDecision:
 
     except Exception as e:
         print(f"[Router] Failed: {e}")
-        return RouteDecision("STORE_MEMORY", "router error fallback")
+        return RouteDecision("DIRECT_CHAT", "router error fallback")
 
 
 # ── STYLE FEEDBACK DETECTION ───────────────────────────────────────────────
@@ -372,6 +454,94 @@ def recall_episodes(question: str, speaker_id: str, top_k: int = 3) -> list:
         return []
 
 
+def _location_from_grounding(grounding_facts: list) -> str:
+    """Extract the user's stored home/current location from grounding facts."""
+    for f in grounding_facts:
+        if f.get("entity") == "user" and f.get("attribute") in (
+            "location", "home", "city", "lives_in", "home_location", "current_location"
+        ):
+            return f.get("value", "")
+    return ""
+
+
+def fetch_grounding(speaker_id: str) -> list:
+    """Fetch always-on biographical grounding facts from the memory agent."""
+    try:
+        r = requests.get(
+            f"{settings.memory_agent_url}/grounding/{speaker_id}", timeout=10
+        )
+        r.raise_for_status()
+        return r.json().get("grounding", [])
+    except Exception as e:
+        print(f"[Grounding] Fetch failed (non-fatal): {e}")
+        return []
+
+
+_GRIEF_ATTRIBUTES = frozenset({"relationship", "presence", "died", "deceased", "passed", "death"})
+_GRIEF_VALUES     = frozenset({"deceased", "absent", "passed away", "died", "dead"})
+
+
+def _format_grounding(facts: list) -> str:
+    """Render grounding facts as a compact background block for Elara's prompt."""
+    if not facts:
+        return ""
+    normal: dict[str, list[str]] = {}
+    sensitive: dict[str, list[str]] = {}
+
+    for f in facts:
+        entity = f.get("entity", "user")
+        attr   = f.get("attribute", "")
+        val    = f.get("value", "")
+        detail = f"{attr} = {val}"
+        if f.get("emotion"):
+            detail += f" (emotion: {f['emotion']})"
+        # Grief-related facts go to a separate block with explicit instruction
+        if attr in _GRIEF_ATTRIBUTES or any(v in val.lower() for v in _GRIEF_VALUES):
+            sensitive.setdefault(entity, []).append(detail)
+        else:
+            normal.setdefault(entity, []).append(detail)
+
+    lines = ["[Background — reference only when directly relevant to what the user just said]"]
+    for entity, items in sorted(normal.items()):
+        label = "About you" if entity == "user" else f"About your {entity}"
+        lines.append(f"{label}: {'; '.join(items)}")
+
+    if sensitive:
+        lines.append("[Sensitive background — DO NOT mention unless the user themselves raises this topic in their message]")
+        for entity, items in sorted(sensitive.items()):
+            label = "About you" if entity == "user" else f"About your {entity}"
+            lines.append(f"{label}: {'; '.join(items)}")
+
+    return "\n".join(lines)
+
+
+_PERSONAL_ENTITIES = {
+    "user", "son", "daughter", "mother", "father", "wife", "husband",
+    "friend", "brother", "sister", "neighbour", "neighbor", "doctor",
+    "caregiver", "child", "children", "grandchild", "pet", "cat", "dog",
+    "location", "restaurant", "hotel", "hospital", "cat",
+}
+
+# Operational routing meta-attributes — never useful in Elara's reply context.
+# These are transient side-effects of memory extraction (search intents, calendar
+# bookkeeping) that should never surface as facts Elara talks about.
+_SKIP_ATTRIBUTES = {
+    "intent", "goal", "looking_for", "searching_for", "wants",
+    "calendar", "calendar_event", "current", "destination",
+}
+
+
+def _is_business_entity(entity: str) -> bool:
+    """Return True if the entity looks like a business/place proper noun, not a personal entity."""
+    if entity.lower() in _PERSONAL_ENTITIES:
+        return False
+    # Multi-word entities starting with a capital are almost certainly business names
+    # (e.g. "High Alpine Brewing Company", "Ol Miner Steakhouse", "Aster Medcity")
+    # Single lowercase words are general categories, keep them.
+    words = entity.split()
+    return len(words) >= 2 and entity[0].isupper()
+
+
 def _format_memory_context(snapshot: dict, episodes: list = None) -> str:
     if not snapshot and not episodes:
         return ""
@@ -380,9 +550,17 @@ def _format_memory_context(snapshot: dict, episodes: list = None) -> str:
     if active:
         # Group by entity so the LLM can clearly distinguish facts about the user
         # from facts about third parties (son, neighbour, etc.).
+        # Skip business/place proper-noun entities — they are world facts from old
+        # web searches and contaminate Elara's context with irrelevant information.
+        # Also skip operational meta-attributes (intent, calendar, etc.) — they are
+        # routing artefacts, not facts Elara should ever mention.
         by_entity: dict[str, list[str]] = {}
         for s in active:
             entity = s["entity"]
+            if _is_business_entity(entity):
+                continue
+            if s["attribute"] in _SKIP_ATTRIBUTES:
+                continue
             fact = f"{s['attribute']} = {s['value']}"
             by_entity.setdefault(entity, []).append(fact)
 
@@ -450,7 +628,7 @@ def _clear_stale_history(state: dict) -> dict:
 # ── ELARA SESSION STATE ────────────────────────────────────────────────────
 
 _GREETING_RE = re.compile(
-    r"^\s*(hey+|hi+|hello+|howdy|yo|sup|good\s+(morning|afternoon|evening|night))\s*[!.?]?\s*$",
+    r"^\s*(hey+(\s+there)?|hi+(\s+there)?|hello+(\s+there)?|howdy|yo|sup|good\s+(morning|afternoon|evening|night))\s*[!.?]?\s*$",
     re.IGNORECASE,
 )
 
@@ -471,11 +649,15 @@ def elara_chat(
     scene: str = None,
     reset_history: bool = False,
     episodes: list = None,
+    grounding_facts: list = None,
 ) -> dict:
-    memory_context = _format_memory_context(snapshot, episodes)
+    grounding_block = _format_grounding(grounding_facts or [])
+    memory_context  = _format_memory_context(snapshot, episodes)
     if emotion and emotion.lower() not in ("normal", "neutral", "none", "unknown"):
         prefix = f"Sensor-detected emotion: {emotion}."
         memory_context = f"{prefix}\n{memory_context}" if memory_context else prefix
+    if grounding_block:
+        memory_context = f"{grounding_block}\n\n{memory_context}" if memory_context else grounding_block
 
     session = cache.get_session(speaker_id)
     if session:
@@ -529,20 +711,20 @@ _LIST_KEYWORDS = ("list", "show", "what are", "do i have", "any reminders", "my 
                   "what's on", "what is on", "upcoming", "scheduled")
 
 
-def run_tool(tool_name: str, user_text: str, speaker_id: str = "user") -> str:
+def run_tool(tool_name: str, user_text: str, speaker_id: str = "user", recent_turns: list = None, user_location: str = None) -> str:
     """Execute a tool via MCP and return its result string."""
     print(f"[Tool] Running: {tool_name} for {speaker_id}")
     text_lower = user_text.lower()
 
     if tool_name == "web_search":
-        args = extract_tool_params("web_search", user_text)
+        args = extract_tool_params("web_search", user_text, recent_turns=recent_turns, user_location=user_location)
         return call_mcp_tool(settings.web_search_mcp_url, "search", args)
 
     if tool_name == "reminder":
         if any(kw in text_lower for kw in _LIST_KEYWORDS):
             return call_mcp_tool(settings.assistant_mcp_url, "list_reminders",
                                  {"speaker_id": speaker_id})
-        args = extract_tool_params("reminder", user_text)
+        args = extract_tool_params("reminder", user_text, recent_turns=recent_turns)
         args["speaker_id"] = speaker_id
         return call_mcp_tool(settings.assistant_mcp_url, "set_reminder", args)
 
@@ -550,7 +732,7 @@ def run_tool(tool_name: str, user_text: str, speaker_id: str = "user") -> str:
         if any(kw in text_lower for kw in _LIST_KEYWORDS):
             return call_mcp_tool(settings.assistant_mcp_url, "list_calendar_events",
                                  {"speaker_id": speaker_id})
-        args = extract_tool_params("calendar", user_text)
+        args = extract_tool_params("calendar", user_text, recent_turns=recent_turns)
         args["speaker_id"] = speaker_id
         return call_mcp_tool(settings.assistant_mcp_url, "add_calendar_event", args)
 

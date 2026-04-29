@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
-from personality import PersonalityVector
+from .personality import PersonalityVector
 
 
 def _coerce_personality(v):

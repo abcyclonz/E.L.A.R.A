@@ -20,7 +20,7 @@ Actions (19):
 from __future__ import annotations
 from typing import Any, Dict, Tuple
 
-from personality import PersonalityVector, DIMS, AFFECT_DEFAULTS
+from .personality import PersonalityVector, DIMS, AFFECT_DEFAULTS
 
 STEP = 0.10   # size of one bandit step
 
@@ -112,7 +112,7 @@ def apply_action(
 # ── Legacy shim ───────────────────────────────────────────────────────────────
 # Kept so any old call-sites that import CurrentConfig from here still work.
 
-from schemas import CurrentConfig   # noqa: E402  (after the main logic)
+from .schemas import CurrentConfig   # noqa: E402  (after the main logic)
 
 def personality_to_elara_config(p: PersonalityVector) -> CurrentConfig:
     """Derive the legacy 4-field ElaraConfig from a PersonalityVector."""

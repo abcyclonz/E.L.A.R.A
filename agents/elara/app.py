@@ -327,6 +327,10 @@ def chat_stream(req: ChatRequest):
 
         la_resp = _run_learning_pipeline(la_req)
 
+        if state.last_was_proactive:
+            adapter._update_proactive_receptiveness(state, la_resp)
+            state.last_was_proactive = False
+
         if la_resp.updated_personality is not None:
             state.personality = la_resp.updated_personality
         if hasattr(la_resp, "personality_hints") and la_resp.personality_hints:
@@ -349,11 +353,31 @@ def chat_stream(req: ChatRequest):
             state.consecutive_distress_turns += 1
         caregiver_alert = adapter._check_distress_watchdog(state)
 
+        # Curiosity: refresh queue + select proactive question
+        from conversation_agent.adapter import _CURIOSITY_REFRESH_INTERVAL
+        state.curiosity_refresh_counter += 1
+        if req.memory_context and (
+            not state.curiosity_queue
+            or state.curiosity_refresh_counter >= _CURIOSITY_REFRESH_INTERVAL
+        ):
+            adapter._refresh_curiosity(state, req.memory_context, state.history)
+            state.curiosity_refresh_counter = 0
+
+        proactive_item = adapter._select_curiosity(state, req.message, affect)
+
         from conversation_agent.rag import build_persona_prompt as _bpp
         system_prompt = _bpp(
             _PERSONA, req.message, state.config.model_dump(),
             req.memory_context, personality=state.personality,
         )
+
+        if proactive_item:
+            system_prompt += (
+                f"\n\n[Organic curiosity — weave into reply naturally]: "
+                f"After addressing the user's message, casually ask: "
+                f"\"{proactive_item.question}\" — make it feel like a spontaneous thought, "
+                f"not an announcement of a new topic. Keep it brief and warm."
+            )
 
         messages = [{"role": "system", "content": system_prompt}]
         for turn in state.history[-(adapter.MAX_HISTORY_TURNS * 2):]:
@@ -376,6 +400,14 @@ def chat_stream(req: ChatRequest):
             yield f"data: {_json.dumps({'token': fallback})}\n\n"
 
         reply = "".join(reply_parts)
+
+        if proactive_item:
+            for d in state.curiosity_queue:
+                if d.get("id") == proactive_item.id:
+                    d["ask_count"] = d.get("ask_count", 0) + 1
+                    break
+            state.last_proactive_turn = state.interaction_count
+            state.last_was_proactive  = True
 
         state.history.append(ConversationTurn(role="assistant", content=reply, timestamp=ts))
         if len(state.history) > adapter.MAX_HISTORY_TURNS * 2:

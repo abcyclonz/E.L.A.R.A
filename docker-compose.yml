@@ -58,6 +58,9 @@ services:
     environment:
       OLLAMA_URL: http://172.17.0.1:11434
       OLLAMA_MODEL: mistral:latest
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      ALERT_FROM_EMAIL: ${ALERT_FROM_EMAIL:-}
+      ALERT_TO_EMAIL: ${ALERT_TO_EMAIL:-}
     volumes:
       - elara_bandit_tables:/app/tables
       - ./agents/elara/conversation_agent:/app/conversation_agent
@@ -81,8 +84,11 @@ services:
     environment:
       DB_PATH: /data/assistant.db
       PORT: 8011
+      GOOGLE_AUTH_DIR: /app/google_auth
+      CALENDAR_TIMEZONE: Asia/Kolkata
     volumes:
       - assistant_data:/data
+      - ./agents/tools/assistant/google_auth:/app/google_auth:ro
 
   orchestrator:
     build: ./agents/orchestrator
@@ -98,6 +104,7 @@ services:
       ASSISTANT_MCP_URL: http://assistant_tool:8011
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
       REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-elara-dev-secret-change-in-prod}
     depends_on:
       - memory_agent
       - elara
@@ -106,10 +113,25 @@ services:
       - redis
     volumes:
       - ./agents/orchestrator/app:/app/app
+      - auth_data:/app/data
     command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - orchestrator
+    environment:
+      NODE_ENV: production
+      BACKEND_URL: http://orchestrator:8001
 
 volumes:
   postgres_data:
   elara_bandit_tables:
   assistant_data:
   redis_data:
+  auth_data:

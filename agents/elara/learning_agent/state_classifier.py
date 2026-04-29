@@ -199,6 +199,13 @@ def apply_escalation_rules(
             return "calm", raw_conf * 0.9, "R4_calm_history_not_disengaged"
         return raw_affect, raw_conf, None
 
+    # R5: low-confidence sadness immediately after a calm turn → don't over-escalate.
+    # Prevents a mild NLP sadness score from persisting when the conversation has
+    # naturally moved on (e.g. user mentions retirement → small model reads as sad).
+    if raw_affect == "sad" and raw_conf < 0.65:
+        if affect_window and affect_window[-1] == "calm":
+            return "calm", raw_conf * 0.85, "R5_low_conf_sad_after_calm"
+
     if not affect_window:
         return raw_affect, raw_conf, None
 

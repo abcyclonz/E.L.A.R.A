@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Elara — Welcome</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>@import url('https://fonts.googleapis.com/css2?family=Geist:wght@100;200;300;400;500;600;700;800;900&display=swap');</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --green: oklch(0.35 0.10 145);
+    --green-light: oklch(0.93 0.05 145);
+    --green-mid: oklch(0.48 0.10 145);
+    --green-dark: oklch(0.26 0.09 145);
+    --ink: oklch(0.13 0.01 145);
+    --ink-2: oklch(0.36 0.02 200);
+    --ink-3: oklch(0.58 0.02 200);
+    --surface: oklch(0.985 0.004 145);
+    --border: oklch(0.90 0.015 145);
+    --white: #fff;
+    --radius: 14px;
+    --radius-sm: 9px;
+    --font: 'Geist', 'DM Sans', sans-serif;
+  }
+  html, body { height: 100%; font-family: var(--font); background: var(--surface); color: var(--ink); }
+  #root { height: 100%; }
+
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+  /* Inputs */
+  .field-group { display: flex; flex-direction: column; gap: 6px; }
+  .field-label { font-size: 13px; font-weight: 500; color: var(--ink-2); letter-spacing: 0.01em; }
+  .field-input {
+    width: 100%; padding: 11px 14px; border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm); font-family: var(--font); font-size: 15px;
+    color: var(--ink); background: var(--white); outline: none;
+    transition: border-color .18s, box-shadow .18s;
+  }
+  .field-input:focus { border-color: var(--green); box-shadow: 0 0 0 3px oklch(0.35 0.10 145 / 0.10); }
+  .field-input::placeholder { color: var(--ink-3); }
+  select.field-input {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; cursor: pointer;
+  }
+
+  /* Buttons */
+  .btn-primary {
+    width: 100%; padding: 13px; background: var(--green); color: var(--white);
+    border: none; border-radius: var(--radius-sm); font-family: var(--font);
+    font-size: 15px; font-weight: 600; cursor: pointer; letter-spacing: 0.01em;
+    transition: background .18s, transform .1s, box-shadow .18s;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn-primary:hover { background: var(--green-dark); box-shadow: 0 4px 18px oklch(0.35 0.10 145 / 0.28); }
+  .btn-primary:active { transform: scale(0.99); }
+  .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
+  .btn-ghost {
+    background: none; border: none; cursor: pointer; font-family: var(--font);
+    font-size: 14px; color: var(--green); font-weight: 500; padding: 2px 0;
+    transition: color .15s; text-decoration: underline; text-underline-offset: 3px;
+  }
+  .btn-ghost:hover { color: var(--green-dark); }
+
+  /* Animations */
+  @keyframes fadeSlide { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .anim-in { animation: fadeSlide .3s ease forwards; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 18px; height: 18px; border: 2.5px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes pulse-ring { 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:1;transform:scale(1.04)} }
+  .reticle-ring { animation: pulse-ring 2.5s ease-in-out infinite; }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+
+  .panel-left {
+    width: 48%; min-height: 100vh; position: sticky; top: 0; height: 100vh;
+    overflow: hidden; flex-shrink: 0;
+  }
+  .panel-left video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: center center;
+  }
+  .panel-left-overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(
+      to bottom,
+      rgba(0,0,0,0.10) 0%,
+      rgba(0,0,0,0.0) 30%,
+      rgba(0,0,0,0.0) 40%,
+      rgba(0,0,0,0.55) 68%,
+      rgba(0,0,0,0.88) 100%
+    );
+    display: flex; flex-direction: column; padding: 44px 48px;
+  }
+
+  /* Right panel — liquid glass */
+  .panel-right {
+    flex: 1; min-height: 100vh; position: relative;
+    background: oklch(0.94 0.04 145);
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: flex-start; padding: 52px 52px;
+    overflow: hidden;
+  }
+  .panel-right-scroll {
+    position: relative; z-index: 2; width: 100%; max-width: 420px;
+    overflow-y: auto; max-height: 100vh; padding: 4px 2px;
+  }
+
+  /* Blobs inside right panel */
+  .r-blob { position: absolute; border-radius: 50%; filter: blur(65px); pointer-events: none; z-index: 0; }
+  .r-blob-1 { width: 480px; height: 480px; top: -120px; right: -100px; background: oklch(0.78 0.10 145 / 0.55); animation: rb1 20s ease-in-out infinite alternate; }
+  .r-blob-2 { width: 380px; height: 380px; bottom: -80px; left: -80px; background: oklch(0.72 0.08 175 / 0.45); animation: rb2 17s ease-in-out infinite alternate; }
+  .r-blob-3 { width: 260px; height: 260px; top: 45%; left: 55%; background: oklch(0.85 0.07 120 / 0.38); animation: rb3 14s ease-in-out infinite alternate; }
+  .r-blob-4 { width: 200px; height: 200px; top: 22%; left: 10%; background: oklch(0.88 0.05 155 / 0.32); animation: rb4 22s ease-in-out infinite alternate; }
+
+  @keyframes rb1 { 0%{transform:translate(0,0) scale(1)} 50%{transform:translate(-70px,90px) scale(1.12)} 100%{transform:translate(-30px,160px) scale(0.92)} }
+  @keyframes rb2 { 0%{transform:translate(0,0) scale(1)} 50%{transform:translate(80px,-60px) scale(1.15)} 100%{transform:translate(40px,-130px) scale(0.95)} }
+  @keyframes rb3 { 0%{transform:translate(-50%,-50%)} 100%{transform:translate(-50%,-50%) translate(70px,-80px) scale(1.15)} }
+  @keyframes rb4 { 0%{transform:translate(0,0)} 100%{transform:translate(50px,60px) scale(1.2)} }
+
+  /* Glass card wrapping the form */
+  .glass-form-card {
+    background: rgba(255,255,255,0.52);
+    backdrop-filter: blur(28px) saturate(1.7);
+    -webkit-backdrop-filter: blur(28px) saturate(1.7);
+    border: 1px solid rgba(255,255,255,0.75);
+    border-radius: 22px;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.09), 0 1px 0 rgba(255,255,255,0.9) inset;
+    padding: 36px 36px 32px;
+  }
+
+  /* Glass inputs */
+  .field-input {
+    background: rgba(255,255,255,0.60) !important;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.80) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 0 rgba(255,255,255,0.8) inset;
+  }
+  .field-input:focus {
+    background: rgba(255,255,255,0.80) !important;
+    border-color: var(--green) !important;
+    box-shadow: 0 0 0 3px oklch(0.35 0.10 145 / 0.12), 0 1px 0 rgba(255,255,255,0.9) inset !important;
+  }
+
+  /* Glass toggle */
+  .glass-toggle {
+    background: rgba(255,255,255,0.38);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.65);
+    border-radius: 99px; padding: 4px; gap: 4px;
+    display: flex; margin-bottom: 32px;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.07);
+  }
+
+  /* Angle chip glass */
+  .angle-chip-active {
+    background: oklch(0.35 0.10 145 / 0.15) !important;
+    backdrop-filter: blur(8px);
+    border-color: oklch(0.35 0.10 145 / 0.45) !important;
+  }
+  .angle-chip-idle {
+    background: rgba(255,255,255,0.45) !important;
+    backdrop-filter: blur(8px);
+    border-color: rgba(255,255,255,0.65) !important;
+  }
+
+  /* ── Glass button with shimmer ── */
+  .btn-primary {
+    position: relative; overflow: hidden;
+    background: linear-gradient(135deg, oklch(0.40 0.11 145), oklch(0.30 0.09 145));
+    box-shadow: 0 4px 20px oklch(0.35 0.10 145 / 0.35), 0 1px 0 rgba(255,255,255,0.20) inset;
+    border: 1px solid oklch(0.45 0.10 145 / 0.5);
+  }
+  .btn-primary::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,0.28) 50%, transparent 65%);
+    transform: translateX(-100%);
+    transition: transform 0.55s ease;
+  }
+  .btn-primary:hover::before { transform: translateX(100%); }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, oklch(0.38 0.11 145), oklch(0.26 0.09 145));
+    box-shadow: 0 6px 28px oklch(0.35 0.10 145 / 0.45), 0 1px 0 rgba(255,255,255,0.25) inset;
+    transform: translateY(-1px);
+  }
+  .btn-primary:active { transform: translateY(0) scale(0.99); }
+  .btn-primary:disabled { opacity: 0.50; cursor: not-allowed; box-shadow: none; transform: none; }
+  .btn-primary:disabled::before { display: none; }
+
+  .right-inner { width: 100%; max-width: 420px; }
+
+  @media (max-width: 860px) {
+    .layout { flex-direction: column; }
+    .panel-left { width: 100%; min-height: 56vw; height: 56vw; position: relative; }
+    .panel-right { padding: 36px 20px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useRef, useEffect } = React;
+
+/* ── Ping-pong Video ── */
+const PingPongVideo = () => {
+  const videoRef = useRef(null);
+  const dirRef = useRef(1); // 1 = forward, -1 = backward
+  const rafRef = useRef(null);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const stepBack = () => {
+      v.currentTime = Math.max(0, v.currentTime - 0.035);
+      if (v.currentTime <= 0.05) {
+        dirRef.current = 1;
+        v.play();
+      } else {
+        rafRef.current = requestAnimationFrame(stepBack);
+      }
+    };
+
+    const onEnded = () => {
+      dirRef.current = -1;
+      rafRef.current = requestAnimationFrame(stepBack);
+    };
+
+    v.addEventListener('ended', onEnded);
+    return () => {
+      v.removeEventListener('ended', onEnded);
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
+  return (
+    <video
+      ref={videoRef}
+      src="uploads/Cute_Robot.mp4"
+      autoPlay
+      muted
+      playsInline
+      style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover', objectPosition:'center center' }}
+    />
+  );
+};
+
+/* ── Stepper ── */
+const Stepper = ({ step }) => (
+  <div style={{display:'flex', alignItems:'center', gap:0, marginTop:24}}>
+    {['Details', 'Face Scan'].map((label, i) => (
+      <React.Fragment key={i}>
+        <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:7}}>
+          <div style={{
+            width:30, height:30, borderRadius:'50%',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:12, fontWeight:700,
+            background: step > i ? 'oklch(0.35 0.10 145)' : step === i ? 'white' : 'rgba(255,255,255,0.2)',
+            color: step > i ? 'white' : step === i ? 'oklch(0.22 0.08 145)' : 'rgba(255,255,255,0.6)',
+            border: step === i ? '2px solid white' : 'none',
+            transition: 'all .3s'
+          }}>{step > i ? '✓' : i + 1}</div>
+          <span style={{fontSize:11, fontWeight:600, color: step===i ? 'white' : 'rgba(255,255,255,0.5)', letterSpacing:'0.04em', textTransform:'uppercase'}}>{label}</span>
+        </div>
+        {i < 1 && (
+          <div style={{flex:1, height:1.5, margin:'0 10px', marginBottom:22,
+            background: step > 0 ? 'white' : 'rgba(255,255,255,0.25)', transition:'background .4s'}}/>
+        )}
+      </React.Fragment>
+    ))}
+  </div>
+);
+
+/* ── Face Reticle ── */
+const FaceReticle = () => (
+  <svg viewBox="0 0 320 240" fill="none" xmlns="http://www.w3.org/2000/svg"
+    style={{position:'absolute', inset:0, width:'100%', height:'100%', pointerEvents:'none'}}>
+    <ellipse className="reticle-ring" cx="160" cy="120" rx="78" ry="98"
+      stroke="oklch(0.35 0.10 145)" strokeWidth="2" strokeDasharray="8 5" opacity="0.9"/>
+    {[[-1,-1],[1,-1],[-1,1],[1,1]].map(([sx,sy],i) => (
+      <g key={i} transform={`translate(${160+sx*78} ${120+sy*98}) scale(${sx} ${sy})`}>
+        <path d="M0 -13 L0 0 L13 0" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.75"/>
+      </g>
+    ))}
+    <line x1="157" y1="120" x2="163" y2="120" stroke="oklch(0.35 0.10 145)" strokeWidth="1.5" opacity="0.7"/>
+    <line x1="160" y1="117" x2="160" y2="123" stroke="oklch(0.35 0.10 145)" strokeWidth="1.5" opacity="0.7"/>
+  </svg>
+);
+
+/* ── Angle Checklist ── */
+const ANGLES = ['Center', 'Left', 'Right', 'Up', 'Tilt'];
+const AngleChecklist = ({ captured }) => (
+  <div style={{display:'flex', flexWrap:'wrap', gap:8, marginTop:14}}>
+    {ANGLES.map((a, i) => (
+      <div key={a} className={captured.includes(i) ? 'angle-chip-active' : 'angle-chip-idle'} style={{
+        display:'flex', alignItems:'center', gap:6, padding:'6px 12px',
+        borderRadius:99, fontSize:13, fontWeight:500,
+        color: captured.includes(i) ? 'var(--green-dark)' : 'var(--ink-3)',
+        border: `1.5px solid`,
+        transition: 'all .22s'
+      }}>
+        <span style={{fontSize:10}}>{captured.includes(i) ? '✓' : '○'}</span>
+        {a}
+      </div>
+    ))}
+  </div>
+);
+
+/* ── Mode Toggle ── */
+const ModeToggle = ({ mode, setMode }) => (
+  <div className="glass-toggle">
+    {['Sign Up', 'Log In'].map(m => (
+      <button key={m} onClick={() => setMode(m)} style={{
+        flex:1, padding:'10px 28px', borderRadius:99, border:'none',
+        background: mode===m ? 'white' : 'transparent',
+        color: mode===m ? 'var(--ink)' : 'var(--ink-3)',
+        fontFamily:'var(--font)', fontSize:14, fontWeight:600, cursor:'pointer',
+        boxShadow: mode===m ? '0 2px 10px rgba(0,0,0,0.10)' : 'none',
+        transition: 'all .22s'
+      }}>{m}</button>
+    ))}
+  </div>
+);
+
+/* ── Step 1 Form ── */
+const Step1Form = ({ onNext }) => {
+  const [form, setForm] = useState({firstName:'', lastName:'', email:'', language:'en'});
+  const [loading, setLoading] = useState(false);
+  const set = k => e => setForm(f => ({...f, [k]: e.target.value}));
+  const valid = form.firstName && form.lastName && form.email.includes('@');
+
+  const handleSubmit = async e => {
+    e.preventDefault();
+    if (!valid) return;
+    setLoading(true);
+    try {
+      await fetch('/api/auth/signup', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({step:1, ...form})}).catch(()=>{});
+      await new Promise(r => setTimeout(r, 800));
+      onNext(form);
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="anim-in" style={{display:'flex', flexDirection:'column', gap:18}}>
+      <div style={{display:'flex', gap:14}}>
+        <div className="field-group" style={{flex:1}}>
+          <label className="field-label">First Name</label>
+          <input className="field-input" placeholder="Jane" value={form.firstName} onChange={set('firstName')}/>
+        </div>
+        <div className="field-group" style={{flex:1}}>
+          <label className="field-label">Last Name</label>
+          <input className="field-input" placeholder="Smith" value={form.lastName} onChange={set('lastName')}/>
+        </div>
+      </div>
+      <div className="field-group">
+        <label className="field-label">Email Address</label>
+        <input className="field-input" type="email" placeholder="jane@example.com" value={form.email} onChange={set('email')}/>
+      </div>
+      <div className="field-group">
+        <label className="field-label">Preferred Language</label>
+        <select className="field-input" value={form.language} onChange={set('language')}>
+          <option value="en">English</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+          <option value="de">Deutsch</option>
+          <option value="ja">日本語</option>
+          <option value="zh">中文</option>
+          <option value="ko">한국어</option>
+        </select>
+      </div>
+      <div style={{height:6}}/>
+      <button className="btn-primary" type="submit" disabled={!valid || loading}>
+        {loading ? <div className="spinner"/> : 'Continue to Face Setup →'}
+      </button>
+    </form>
+  );
+};
+
+/* ── Step 2 Face Scan ── */
+const Step2Face = ({ onDone }) => {
+  const [captured, setCaptured] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const nextAngle = ANGLES.findIndex((_, i) => !captured.includes(i));
+  const done = captured.length === ANGLES.length;
+
+  const handleCapture = async () => {
+    if (done) { onDone(); return; }
+    setLoading(true);
+    await new Promise(r => setTimeout(r, 900));
+    setCaptured(c => [...c, nextAngle]);
+    setLoading(false);
+  };
+
+  return (
+    <div className="anim-in" style={{display:'flex', flexDirection:'column', gap:14}}>
+      <p style={{fontSize:14, color:'var(--ink-2)', lineHeight:1.6}}>
+        Position your face in the frame and capture each angle. Good lighting helps.
+      </p>
+      <div style={{position:'relative', aspectRatio:'4/3', background:'oklch(0.12 0.01 145)', borderRadius:12, overflow:'hidden', border:'1.5px solid var(--border)'}}>
+        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style={{position:'absolute', inset:0}}>
+          <defs>
+            <pattern id="diag" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="24" height="24" fill="oklch(0.12 0.01 145)"/>
+              <rect width="12" height="24" fill="oklch(0.15 0.01 145)"/>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#diag)"/>
+        </svg>
+        <div style={{position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10}}>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="oklch(0.45 0.03 145)" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <span style={{fontSize:13, color:'oklch(0.50 0.04 145)', fontWeight:500}}>
+            {done ? 'All angles captured ✓' : `Look: ${ANGLES[nextAngle]}`}
+          </span>
+        </div>
+        <FaceReticle/>
+      </div>
+      <AngleChecklist captured={captured}/>
+      <div style={{height:2}}/>
+      <button className="btn-primary" onClick={handleCapture} disabled={loading}>
+        {loading ? <><div className="spinner"/> Capturing…</> : done ? 'Complete Registration →' : `Capture Frame (${captured.length}/${ANGLES.length})`}
+      </button>
+    </div>
+  );
+};
+
+/* ── Login Face ── */
+const LoginFace = () => {
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState(null);
+
+  const handleVerify = async () => {
+    setLoading(true); setStatus(null);
+    await new Promise(r => setTimeout(r, 1500));
+    await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({faceAuth:true})}).catch(()=>{});
+    setStatus('verified');
+    setLoading(false);
+    setTimeout(() => { window.location.href = 'dashboard.html'; }, 700);
+  };
+
+  return (
+    <div className="anim-in" style={{display:'flex', flexDirection:'column', gap:14}}>
+      <p style={{fontSize:14, color:'var(--ink-2)', lineHeight:1.6}}>
+        Look directly at the camera. We'll match your face against your profile.
+      </p>
+      <div style={{position:'relative', aspectRatio:'4/3', background:'oklch(0.12 0.01 145)', borderRadius:12, overflow:'hidden', border:'1.5px solid var(--border)'}}>
+        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style={{position:'absolute', inset:0}}>
+          <defs>
+            <pattern id="diag2" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="24" height="24" fill="oklch(0.12 0.01 145)"/>
+              <rect width="12" height="24" fill="oklch(0.15 0.01 145)"/>
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#diag2)"/>
+        </svg>
+        <div style={{position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10}}>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="oklch(0.45 0.03 145)" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <span style={{fontSize:13, color: status==='verified' ? 'oklch(0.45 0.12 145)' : 'oklch(0.50 0.04 145)', fontWeight:500}}>
+            {status==='verified' ? '✓ Identity confirmed' : 'Face recognition active'}
+          </span>
+        </div>
+        <FaceReticle/>
+        {status === 'verified' && (
+          <div style={{position:'absolute', inset:0, background:'oklch(0.35 0.10 145 / 0.10)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+            <div style={{width:52, height:52, borderRadius:'50%', background:'oklch(0.35 0.10 145)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{height:4}}/>
+      <button className="btn-primary" onClick={handleVerify} disabled={loading || status==='verified'}>
+        {loading ? <><div className="spinner"/> Scanning…</> : status==='verified' ? '✓ Verified' : 'Verify Face'}
+      </button>
+    </div>
+  );
+};
+
+/* ── App ── */
+const App = () => {
+  const [mode, setMode] = useState('Sign Up');
+  const [step, setStep] = useState(0);
+
+  const switchMode = m => { setMode(m); setStep(0); };
+  const handleNext = () => setStep(1);
+  const handleDone = () => { window.location.href = 'dashboard.html'; };
+
+  return (
+    <div className="layout">
+
+      {/* LEFT — Video Panel */}
+      <div className="panel-left">
+        <PingPongVideo/>
+        <div className="panel-left-overlay">
+          {/* Logo top-left */}
+          <div style={{flexShrink:0}}>
+            <img
+              src="uploads/elara_white.png"
+              alt="Elara"
+              style={{height:58, width:'auto', objectFit:'contain', objectPosition:'left', filter:'drop-shadow(0 1px 6px rgba(0,0,0,0.3))'}}
+            />
+          </div>
+
+          {/* Spacer */}
+          <div style={{flex:1}}/>
+
+          {/* Bottom copy + stepper */}
+          <div style={{flexShrink:0}}>
+            <h1 style={{
+              fontSize:'clamp(24px, 2.8vw, 40px)', fontWeight:700, color:'white',
+              lineHeight:1.18, letterSpacing:'-0.03em', marginBottom:14,
+              textShadow:'0 2px 20px rgba(0,0,0,0.4)'
+            }}>
+              Welcome to your<br/>new companion.
+            </h1>
+            <p style={{
+              fontSize:15, color:'rgba(255,255,255,0.75)', lineHeight:1.65,
+              maxWidth:340, textShadow:'0 1px 8px rgba(0,0,0,0.4)', marginBottom:8
+            }}>
+              Elara remembers the things that matter. Your routines, your stories, your people — always at your side.
+            </p>
+
+            {mode === 'Sign Up' && <Stepper step={step}/>}
+
+            <p style={{fontSize:11, color:'rgba(255,255,255,0.35)', marginTop:24, lineHeight:1.6}}>
+              Facial data never leaves your device. End-to-end encrypted.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* RIGHT — Liquid Glass Panel */}
+      <div className="panel-right">
+        {/* Animated blobs */}
+        <div className="r-blob r-blob-1"/>
+        <div className="r-blob r-blob-2"/>
+        <div className="r-blob r-blob-3"/>
+        <div className="r-blob r-blob-4"/>
+
+        {/* Scrollable content */}
+        <div className="panel-right-scroll" style={{display:'flex', alignItems:'center', minHeight:'100vh', paddingTop:40, paddingBottom:40}}>
+          <div style={{width:'100%'}}>
+            <div className="glass-form-card">
+              <div style={{marginBottom:24}}>
+                <p style={{fontSize:13, color:'var(--ink-3)', marginBottom:6}}>Step into something new</p>
+                <h2 style={{fontSize:'clamp(20px, 2vw, 28px)', fontWeight:700, letterSpacing:'-0.025em', color:'var(--ink)'}}>
+                  {mode==='Sign Up' ? (step===0 ? 'Create your account' : 'Set up face recognition') : 'Welcome back'}
+                </h2>
+              </div>
+
+              <ModeToggle mode={mode} setMode={switchMode}/>
+
+              {mode === 'Sign Up'
+                ? (step === 0 ? <Step1Form onNext={handleNext}/> : <Step2Face onDone={handleDone}/>)
+                : <LoginFace/>
+              }
+
+              <div style={{marginTop:28, textAlign:'center', fontSize:13, color:'var(--ink-3)'}}>
+                {mode==='Sign Up'
+                  ? <>Already have an account? <button className="btn-ghost" onClick={() => switchMode('Log In')}>Log in</button></>
+                  : <>New here? <button className="btn-ghost" onClick={() => switchMode('Sign Up')}>Create an account</button></>
+                }
+              </div>
+            </div>
+
+            <div style={{marginTop:20, display:'flex', gap:20, justifyContent:'center'}}>
+              {['Privacy Policy','Terms of Use','Accessibility'].map(t => (
+                <a key={t} href="#" style={{fontSize:12, color:'var(--ink-2)', textDecoration:'none', opacity:0.6}}>{t}</a>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

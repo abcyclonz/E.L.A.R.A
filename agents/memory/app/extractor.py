@@ -136,6 +136,12 @@ def extract_claims(text: str, emotion: str = None, scene: str = None) -> Extract
                 claim.importance = max(0.0, min(1.0, claim.importance))
                 if claim.stability not in ("permanent", "stable", "transient"):
                     claim.stability = "stable"
+                # Intent/goal attributes are inherently short-lived — never persist them long
+                if str(getattr(claim, "attribute", "")).lower() in (
+                    "intent", "goal", "looking_for", "searching_for", "wants"
+                ):
+                    claim.stability = "transient"
+                    claim.importance = min(claim.importance, 0.4)
                 claims.append(claim)
             except Exception as e:
                 print(f"[Extractor] Skipping claim {c}: {e}")

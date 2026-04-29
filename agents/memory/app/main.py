@@ -12,6 +12,7 @@ from app.memory import (
     log_raw, write_state, write_belief, write_event,
     update_frequency, assemble_snapshot,
     write_episode, get_similar_episodes,
+    get_grounding_facts,
 )
 from app.models import ClaimType
 
@@ -57,6 +58,17 @@ CREATE INDEX IF NOT EXISTS idx_state_importance  ON state_memory(importance DESC
 CREATE INDEX IF NOT EXISTS idx_belief_importance ON belief_memory(importance DESC);
 """
 
+_GROUNDING_MIGRATION = """
+ALTER TABLE state_memory  ADD COLUMN IF NOT EXISTS is_grounding BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE belief_memory ADD COLUMN IF NOT EXISTS is_grounding BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_state_grounding  ON state_memory(is_grounding, speaker_id) WHERE is_grounding = TRUE;
+CREATE INDEX IF NOT EXISTS idx_belief_grounding ON belief_memory(is_grounding, speaker_id) WHERE is_grounding = TRUE;
+UPDATE state_memory  SET is_grounding = TRUE
+  WHERE importance >= 0.85 AND stability = 'permanent' AND valid_to IS NULL AND is_grounding = FALSE;
+UPDATE belief_memory SET is_grounding = TRUE
+  WHERE importance >= 0.85 AND stability = 'permanent' AND valid_to IS NULL AND is_grounding = FALSE;
+"""
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -68,7 +80,8 @@ async def lifespan(app: FastAPI):
             db.execute(_t(_EPISODES_DDL))
             db.execute(_t(_SPEAKER_ID_MIGRATION))
             db.execute(_t(_PRIORITY_MIGRATION))
-        print("✅ Schema ready (episodes + speaker_id + priority columns)")
+            db.execute(_t(_GROUNDING_MIGRATION))
+        print("✅ Schema ready (episodes + speaker_id + priority + grounding columns)")
     except Exception as e:
         print(f"❌ Startup error: {e}")
     yield
@@ -204,6 +217,20 @@ def recall_episodes(req: RecallRequest):
         if r["similarity"] > 0.5
     ]
     return RecallResponse(episodes=episodes)
+
+
+# ── GROUNDING ──────────────────────────────────────────────────────────────
+
+@app.get("/grounding/{speaker_id}")
+def grounding(speaker_id: str):
+    """
+    Return all grounding facts for a speaker — high-importance permanent facts
+    that Elara should always carry in context regardless of the current topic.
+    Never filtered by salience or query.
+    """
+    with get_db() as db:
+        facts = get_grounding_facts(db, speaker_id)
+    return {"grounding": facts}
 
 
 # ── HEALTH ─────────────────────────────────────────────────────────────────
