@@ -9,6 +9,180 @@
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
+[2026-05-03]  Full system test + 8-bug fix pass — routing, grief, filter depth
+────────────────────────────────────────────────────────────────────────────────
+
+AUTOMATED TEST SUITE ADDED  (run_tests.py)
+  • 43-check automated test suite built and run against the live stack.
+  • Covers 13 scenarios: greeting/session reset, memory storage/retrieval,
+    short-circuit routing (8 patterns), grief gating, affect detection,
+    web search, reminders, context-aware correction, name-poisoning guard,
+    distress smoother, social routing, and a 6-turn natural conversation.
+  • Final score: 41/43 passing (2 remaining are Mistral 7B generation
+    variability on grief phrasing — addressed by filter but not fully
+    eliminatable at 7B model size; see LLM upgrade note below).
+
+BUG FIX — Implicit nearby-search not routing to USE_TOOL  (orchestrator/app/main.py)
+  • "I could really use a coffee right now" → STORE_MEMORY instead of USE_TOOL.
+    Rule (e) in the router prompt was LLM-dependent; Mistral 7B missed it.
+  • Added _IMPLICIT_SEARCH_RE short-circuit before the LLM router.
+    Catches "I could really use a X / I could do with a X / I'm craving X"
+    for food/drink/service tangibles → USE_TOOL | web_search.
+
+BUG FIX — Tool-search corrections not re-routing to USE_TOOL  (orchestrator/app/main.py + cache.py)
+  • "Oh sorry, I meant restaurants, not hotels" (after a hotel search)
+    → STORE_AND_RETRIEVE instead of USE_TOOL. Rule (d) was LLM-dependent.
+  • Added cache.get_last_action() / set_last_action() to track the last
+    router action per-speaker in Redis (or in-memory fallback).
+  • Added _TOOL_CORRECTION_RE short-circuit: fires only when last_action
+    == USE_TOOL and message matches "sorry I meant / I meant X not Y /
+    actually search for" → USE_TOOL | web_search.
+
+BUG FIX — Explicit "can you find" searches mis-routed on cold sessions  (orchestrator/app/main.py)
+  • "Can you find some good hotels in Kochi?" → STORE_MEMORY on a fresh
+    speaker with no prior context (LLM variability).
+  • Added _EXPLICIT_SEARCH_RE short-circuit for "can you find/search/
+    look up..." patterns → USE_TOOL | web_search.
+
+BUG FIX — Elara-directed wellbeing questions routed to STORE_MEMORY  (orchestrator/app/main.py)
+  • "How have you been lately, Elara?" → STORE_MEMORY.
+    _ELARA_OPINION_RE only matched "what do you think/feel/reckon about X".
+  • Extended _ELARA_OPINION_RE to also match "how have you been / how are
+    you doing / how's your day / are you okay" → DIRECT_CHAT.
+
+BUG FIX — Deceased names leaking via cross-reference facts  (orchestrator/app/agents.py)
+  • _format_grounding() and _format_memory_context() correctly identified
+    Margaret.life_status=deceased but missed cross-reference facts like
+    Rajan.spouse=Margaret — entity is "Rajan" so it passed the deceased
+    check even though the value names the deceased person.
+  • After building deceased_entities set, extract proper-noun deceased names
+    and also exclude any fact whose VALUE contains those names.
+    Applied to both _format_grounding() and _format_memory_context().
+
+BUG FIX — Sensitive block leaking deceased person's preferences  (orchestrator/app/agents.py)
+  • deceased_relative.preference=roses in sensitive block caused Elara to
+    ask "how are your roses doing?" — Mistral 7B treats preferences in the
+    sensitive block as conversational topics even with DO NOT mention.
+  • Added _SENSITIVE_OMIT_ATTRS: strips preference/interest/skill/hobby/
+    product/favourite attributes from the sensitive block entirely.
+
+BUG FIX — _GRIEF_SENTENCE_RE missing 8 phrase patterns  (elara/conversation_agent/adapter.py)
+  • Several grief phrasings bypassed the post-processing filter:
+    "the loss of", "Margaret's passing", "feelings of loss",
+    "Losing someone", "just as Margaret was", "Margaret loved watching",
+    "times with Margaret", "you miss her" (base form, not missing/missed).
+  • Expanded _GRIEF_SENTENCE_RE with 8 new sub-patterns; made miss(ing|ed)?
+    optional to also catch the base form "miss her/him/them".
+
+BUG FIX — Grief filter unaware of deceased person's name  (elara/conversation_agent/adapter.py)
+  • "I can imagine Margaret cheering along with you" contained no grief
+    keyword — the sentence-level filter could never catch name-specific
+    indirect references without knowing which names are deceased.
+  • Added _deceased_names_from_context(memory_context): parses proper-noun
+    names from the [Sensitive background] block of the memory context string.
+  • _strip_unsolicited_grief() now accepts a deceased_names set and filters
+    any sentence mentioning those names when the user didn't raise them.
+    Called from handle_turn() in adapter.py with names extracted each turn.
+
+ARCHITECTURAL NOTE — LLM UPGRADE PLANNED
+  • The majority of routing short-circuits and grief filter complexity exists
+    because Mistral 7B cannot reliably follow multi-conditional system prompt
+    instructions. The model ignores "DO NOT mention" boundaries and misroutes
+    messages that a larger model handles correctly from the prompt alone.
+  • PLAN: upgrade the router and conversation LLM to Llama 3 70B via Groq
+    (or equivalent capable model). This would collapse most of the routing
+    short-circuit layer and make the grief sensitive-block instruction
+    actually reliable — reducing code complexity and improving reply quality.
+  • Current short-circuit layer remains as a safety net even after upgrade.
+
+
+────────────────────────────────────────────────────────────────────────────────
+[2026-05-02]  Grief leakage fix + 5-bug routing/context pass (session 2)
+────────────────────────────────────────────────────────────────────────────────
+
+BUG FIX — Stale emotion tags causing false emotional inference  (orchestrator/app/agents.py)
+  • _format_grounding() was appending "(emotion: frustrated)" to facts in the
+    grounding block, e.g. "family_structure = two sons (emotion: frustrated)".
+    Elara read these historical storage-time tags as the user's CURRENT state,
+    causing greetings like "hey" to trigger "It sounds like you're having a tough
+    time with the family situation."
+  • Fix: emotion tags stripped entirely from grounding display. They are internal
+    metadata about when a fact was learned, not the user's present affect.
+
+BUG FIX — Deceased relative facts leaking through retrieval context  (orchestrator/app/agents.py)
+  • The grounding block fix only protected the grounding path. On RETRIEVE_MEMORY
+    turns, _format_memory_context() had no grief filtering — wife.skill, wife.product,
+    partner.relationship_duration, deceased_relative.preference appeared in plain text,
+    causing Elara to recap "48 years together… cupcakes… roses" unprompted.
+  • Fix: applied the same two-pass deceased-entity logic to _format_memory_context().
+    Entities identified as deceased (or spouse-linked to a deceased entity) are
+    excluded from the retrieval snapshot — they are already covered by the sensitive
+    grounding block.
+
+BUG FIX — user.name=unknown (conf 1.0) poisoning name field  (orchestrator/app/agents.py)
+  • "just speak normally pk?" was being stored via STORE_MEMORY (now fixed, see below),
+    and the memory extractor pulled user.name=unknown at confidence 1.0 from it.
+    This surfaced in every retrieval and confused Elara about the user's name.
+  • Fix: name=unknown/none/"" entries filtered out in both _format_grounding() and
+    _format_memory_context() — never shown to Elara regardless of what is in the DB.
+
+BUG FIX — Complaint / denial messages routed to STORE_MEMORY  (orchestrator/app/main.py)
+  • "i didnt say any of this", "bro just stop this" — neither matched
+    _ELARA_COMPLAINT_RE, so both were routed to STORE_MEMORY and extracted spurious
+    claims with emotion=frustrated bleeds.
+  • Expanded _ELARA_COMPLAINT_RE: added "i didn't/never said (that/this/any)",
+    "just stop", "bro stop", "stop it/this/that", "what are you (even) talking about",
+    "that's not what I said".
+
+BUG FIX — Single-word disbelief expressions routed to STORE_MEMORY  (orchestrator/app/agents.py)
+  • "what" expressed as a standalone word (disbelief/confusion) was not in
+    _AFFIRMATION_RE, so it fell through to the LLM router → STORE_MEMORY → spurious
+    memory extraction.
+  • Added to _AFFIRMATION_RE: what, huh, eh, oh, wow, really, seriously, come on,
+    no way — all treated as DIRECT_CHAT with no memory touch.
+
+
+────────────────────────────────────────────────────────────────────────────────
+[2026-05-02]  Grief leakage fix + 2-bug routing pass
+────────────────────────────────────────────────────────────────────────────────
+
+BUG FIX — Deceased relative facts leaking into normal context  (orchestrator/app/agents.py)
+  • Root cause: _format_grounding() only checked the *attribute* of each fact for
+    grief markers. Facts like wife.skill=make cupcakes, wife.product=cupcakes,
+    wife.job=cupcake_maker, partner.relationship_duration=48 years, and
+    deceased_relative.preference=roses all landed in Elara's normal background
+    block, causing her to spontaneously connect roses/cupcakes → deceased wife
+    even on a plain greeting.
+  • Fix: two-pass classification in _format_grounding():
+    1. First pass identifies all deceased entities by attribute, value, or
+       entity name (e.g. "deceased_relative.*" caught by name).
+    2. Spouse linkage: if any spouse-type entity (wife/husband/partner/spouse)
+       is deceased, ALL spouse-type entities are marked deceased.
+    3. Second pass routes EVERY fact about a deceased entity to the sensitive
+       "[Sensitive background — DO NOT mention unless user raises this topic]"
+       block, regardless of attribute.
+  • Added _SPOUSE_TERMS frozenset for the spouse linkage logic.
+
+BUG FIX — Grief post-processing filter too narrow  (elara/conversation_agent/adapter.py)
+  • _GRIEF_SENTENCE_RE did not catch indirect grief references:
+    "missing her/him", "beloved mother/wife", "linger in your heart",
+    "thinking about her recently", "she's gone", "still remember her".
+  • LLM was generating these softer phrasings to bypass the original patterns
+    while still referring to the deceased — including hallucinating "Mother's Day"
+    from the May date combined with deceased wife facts.
+  • Expanded _GRIEF_SENTENCE_RE with six additional sub-patterns to catch
+    these indirect references.
+
+BUG FIX — Style request routed to STORE_MEMORY  (orchestrator/app/main.py)
+  • "just speak normally pk?" matched no short-circuit and was routed by the
+    LLM to STORE_MEMORY, extracting a spurious user.name=unknown fact at conf 1.0
+    and tagging retrieved facts with emotion=frustrated.
+  • Added _STYLE_FEEDBACK_RE short-circuit before the LLM router:
+    casual style requests ("speak normally", "just be natural", "stop being so
+    formal", etc.) → DIRECT_CHAT, memory untouched.
+
+
+────────────────────────────────────────────────────────────────────────────────
 [2026-04-29]  Proactive curiosity system + 7-bug quality pass
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -438,8 +612,9 @@ Full pipeline:
 ================================================================================
 
   • Speaker ID persistence: known_speakers is in-memory, lost on restart
-  • Location awareness: web searches for "nearby" have no GPS coordinates;
-    results are city-level at best unless user has stated their location
+  • Location awareness: frontend requests browser geolocation → Nominatim
+    reverse geocode → city string sent with every message; memory-stored
+    location used as fallback. Web searches are now location-specific.
   • Bandit cold start: first ~20 turns are exploration; no population warm-start
   • LLM quality ceiling: Mistral 7B occasionally hallucinates mild emotional
     context and gives unsolicited advice; Llama 3 70B via Groq would improve this

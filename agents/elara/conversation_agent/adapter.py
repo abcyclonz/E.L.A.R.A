@@ -60,6 +60,99 @@ _IMMEDIATE_POSITIVE_REWARD = 1.0
 # Step size for applying personality hints directly (supervised nudge)
 _HINT_STEP = 0.08
 
+# Grief post-processing: strip sentences that reference death/deceased relatives
+# when the user's own message contains no grief trigger words.
+_GRIEF_USER_TRIGGER_RE = re.compile(
+    r"\b(miss(ed|ing)?|passed\s+away|passed\s+on|died|death|funeral|grave|"
+    r"grief|griev(ing|ed)?|mourn(ing|ed)?|"
+    r"late\s+(wife|husband|mother|father|mum|mummy|dad|daddy)|"
+    r"widow(er)?|no\s+longer\s+with\s+us)\b",
+    re.IGNORECASE,
+)
+
+_GRIEF_SENTENCE_RE = re.compile(
+    r"\b(late\s+(wife|husband|mother|father|mum|mummy|dad|daddy|son|daughter)|"
+    r"passed\s+away|passed\s+on|deceased|"
+    r"(has\s+)?(died|death)|funeral|grave|"
+    r"grief|griev(ing|ed)?|mourn(ing|ed)?|"
+    r"widow(er)?|no\s+longer\s+with\s+us|"
+    r"miss(ing|ed)?\s+(her|him|them)|"
+    r"beloved\s+(wife|husband|mother|father|mum|dad|partner)|"
+    r"(she|he).?s?\s+(gone|no\s+longer\s+here|passed)|"
+    r"loved\s+one.{0,20}(gone|passed|lost|no\s+longer)\b|"
+    r"\bthe\s+(loss|passing)\s+of\b|"
+    r"\b(your|his|her|our|their)\s+(loss|passing|passing\s+away)\b|"
+    r"\b\w+.?s\s+passing\b|"
+    r"\blosing\s+someone\b|"
+    r"\b(sorry|apologize).{0,25}(loss|passing|gone|grief)\b|"
+    r"\bfeelings?\s+of\s+(loss|grief|sadness|loneliness)\b|"  # "feelings of loss"
+    r"\bsense\s+of\s+(loss|grief)\b|"
+    r"linger(s|ing)?\s+in\s+your\s+heart|"
+    r"(thinking|thought)\s+about\s+(her|him)\s+(a\s+lot|recently|today|lately)|"
+    r"(still\s+)?(remember|cherish|treasure)\s+(her|him)\b|"
+    r"\bjust\s+as\s+\w+\s+was\b|"                            # "just as Margaret was"
+    r"\b\w+\s+loved\s+(watching|sharing|doing|making|being|spending)\b|"  # "Margaret loved watching"
+    r"\breminisce\s+about\s+(times\s+with|memories\s+of)\b|" # "reminisce about times with [name]"
+    r"\btimes\s+(with|together\s+with)\s+\w+\b|"             # "times with Margaret"
+    r"\bshare.{0,20}memories.{0,20}with\s+\w+\b|"           # "share some memories with Margaret"
+    r"\bfond\s+memories.{0,30}(her|him|\w+)\b)\b",           # "fond memories of Margaret"
+    re.IGNORECASE,
+)
+
+
+def _deceased_names_from_context(memory_context: str) -> set:
+    """Extract proper-noun names of deceased entities from the sensitive memory block."""
+    if not memory_context:
+        return set()
+    names: set = set()
+    in_sensitive = False
+    for line in memory_context.splitlines():
+        if "Sensitive background" in line:
+            in_sensitive = True
+            continue
+        if in_sensitive:
+            if line.startswith("["):
+                in_sensitive = False
+                continue
+            # Lines look like "About your Margaret: ..." or "About your wife: ..."
+            m = re.match(r"About your ([A-Z][a-zA-Z]+):", line)
+            if m:
+                name = m.group(1)
+                # Only include proper names (capitalised, not generic relationship terms)
+                if name not in {"Wife", "Husband", "Partner", "Spouse", "Mother", "Father",
+                                "Son", "Daughter", "Friend", "User"}:
+                    names.add(name.lower())
+    return names
+
+
+def _strip_unsolicited_grief(user_message: str, reply: str,
+                              deceased_names: set | None = None) -> str:
+    """Remove grief/death sentences from reply when user didn't raise the topic."""
+    if _GRIEF_USER_TRIGGER_RE.search(user_message):
+        return reply
+    # Also skip the name-filter if the user themselves mentioned the deceased name
+    user_lower = user_message.lower()
+    active_names = {n for n in (deceased_names or set()) if n not in user_lower}
+
+    def _is_grief_sentence(s: str) -> bool:
+        if _GRIEF_SENTENCE_RE.search(s):
+            return True
+        # Also filter any sentence that mentions a deceased person by name unprompted
+        if active_names:
+            s_lower = s.lower()
+            if any(name in s_lower for name in active_names):
+                return True
+        return False
+
+    sentences = re.split(r"(?<=[.!?])\s+", reply.strip())
+    clean = [s for s in sentences if not _is_grief_sentence(s)]
+    result = " ".join(clean).strip()
+    if len(result) >= 10:
+        if result != reply:
+            log.info("grief-filter: stripped unsolicited grief reference from reply")
+        return result
+    return reply
+
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
@@ -263,6 +356,12 @@ class ConversationAdapter:
         except Exception as exc:
             log.error("LLM call failed: %s", exc)
             reply = "I'm sorry, I'm having a little trouble thinking right now. Please try again."
+
+        # Strip grief references when user didn't raise the topic.
+        # Pass deceased names extracted from memory context so name-specific
+        # references (e.g. "just as Margaret was") are also filtered.
+        _dec_names = _deceased_names_from_context(req.memory_context or "")
+        reply = _strip_unsolicited_grief(req.message, reply, _dec_names)
 
         # Strip spurious greeting Mistral emits after the first turn
         if has_prior_reply and reply:

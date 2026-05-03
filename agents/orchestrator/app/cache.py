@@ -62,6 +62,32 @@ def set_session(speaker_id: str, state: dict) -> None:
     _fb_sessions[speaker_id] = state
 
 
+# ── LAST ROUTER ACTION ─────────────────────────────────────────────────────
+
+_fb_last_action: dict[str, str] = {}
+
+
+def get_last_action(speaker_id: str) -> str | None:
+    r = _get()
+    if r:
+        try:
+            return r.get(f"last_action:{speaker_id}")
+        except Exception:
+            pass
+    return _fb_last_action.get(speaker_id)
+
+
+def set_last_action(speaker_id: str, action: str) -> None:
+    r = _get()
+    if r:
+        try:
+            r.set(f"last_action:{speaker_id}", action, ex=86400)
+            return
+        except Exception:
+            pass
+    _fb_last_action[speaker_id] = action
+
+
 # ── TURN COUNTERS ──────────────────────────────────────────────────────────
 
 def incr_turn_count(speaker_id: str) -> int:

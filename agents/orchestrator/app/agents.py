@@ -479,12 +479,41 @@ def fetch_grounding(speaker_id: str) -> list:
 
 _GRIEF_ATTRIBUTES = frozenset({"relationship", "presence", "died", "deceased", "passed", "death"})
 _GRIEF_VALUES     = frozenset({"deceased", "absent", "passed away", "died", "dead"})
+# Spouse-type entity names: if any of these is deceased, ALL of them are treated as deceased.
+_SPOUSE_TERMS     = frozenset({"wife", "husband", "partner", "spouse"})
 
 
 def _format_grounding(facts: list) -> str:
     """Render grounding facts as a compact background block for Elara's prompt."""
     if not facts:
         return ""
+
+    # First pass: build the set of deceased entities.
+    # Once an entity is known deceased, ALL facts about it go to the sensitive block —
+    # not just the fact that marks it as deceased.
+    deceased_entities: set = set()
+    for f in facts:
+        entity = f.get("entity", "")
+        attr   = f.get("attribute", "")
+        val    = f.get("value", "").lower()
+        is_grief_fact = (
+            attr in _GRIEF_ATTRIBUTES
+            or any(v in val for v in _GRIEF_VALUES)
+            or "deceased" in entity.lower()
+        )
+        if is_grief_fact:
+            deceased_entities.add(entity)
+            if entity in _SPOUSE_TERMS:
+                deceased_entities.update(_SPOUSE_TERMS)
+
+    # Proper-noun names of deceased entities (e.g. "Margaret") — used to catch
+    # cross-reference facts like "Rajan.spouse = Margaret" that would otherwise
+    # appear in the normal block and prompt Elara to mention the deceased by name.
+    _dec_names = {
+        n.lower() for n in deceased_entities - _SPOUSE_TERMS - {"user", "deceased_relative", "family"}
+        if n and len(n) > 2
+    }
+
     normal: dict[str, list[str]] = {}
     sensitive: dict[str, list[str]] = {}
 
@@ -492,11 +521,20 @@ def _format_grounding(facts: list) -> str:
         entity = f.get("entity", "user")
         attr   = f.get("attribute", "")
         val    = f.get("value", "")
+        # Skip name=unknown — historical extraction artefact, actively misleads the LLM.
+        if attr == "name" and val.lower() in ("unknown", "none", ""):
+            continue
+        # Omit emotion tags: they record the emotional context when a fact was stored,
+        # not the user's current state. Showing them causes Elara to infer stale emotions.
         detail = f"{attr} = {val}"
-        if f.get("emotion"):
-            detail += f" (emotion: {f['emotion']})"
-        # Grief-related facts go to a separate block with explicit instruction
-        if attr in _GRIEF_ATTRIBUTES or any(v in val.lower() for v in _GRIEF_VALUES):
+        is_grief = (
+            entity in deceased_entities
+            or attr in _GRIEF_ATTRIBUTES
+            or any(v in val.lower() for v in _GRIEF_VALUES)
+            or "deceased" in entity.lower()
+            or any(name in val.lower() for name in _dec_names)  # cross-ref: value names deceased
+        )
+        if is_grief:
             sensitive.setdefault(entity, []).append(detail)
         else:
             normal.setdefault(entity, []).append(detail)
@@ -506,11 +544,25 @@ def _format_grounding(facts: list) -> str:
         label = "About you" if entity == "user" else f"About your {entity}"
         lines.append(f"{label}: {'; '.join(items)}")
 
+    # Attributes that describe deceased person's interests/preferences/skills —
+    # showing these in the sensitive block enables indirect leaks ("how are your
+    # roses doing?") even with the DO NOT mention instruction. Strip them entirely.
+    _SENSITIVE_OMIT_ATTRS = frozenset({
+        "preference", "interest", "hobby", "skill", "product", "job", "occupation",
+        "like", "likes", "love", "loves", "favourite", "favorite", "talent",
+    })
+
     if sensitive:
         lines.append("[Sensitive background — DO NOT mention unless the user themselves raises this topic in their message]")
         for entity, items in sorted(sensitive.items()):
+            filtered = [
+                it for it in items
+                if not any(it.lower().startswith(a + " =") for a in _SENSITIVE_OMIT_ATTRS)
+            ]
+            if not filtered:
+                continue
             label = "About you" if entity == "user" else f"About your {entity}"
-            lines.append(f"{label}: {'; '.join(items)}")
+            lines.append(f"{label}: {'; '.join(filtered)}")
 
     return "\n".join(lines)
 
@@ -554,12 +606,43 @@ def _format_memory_context(snapshot: dict, episodes: list = None) -> str:
         # web searches and contaminate Elara's context with irrelevant information.
         # Also skip operational meta-attributes (intent, calendar, etc.) — they are
         # routing artefacts, not facts Elara should ever mention.
+        # Identify deceased entities — their facts are already in the sensitive
+        # grounding block; exclude them from the retrieval snapshot to prevent
+        # Elara recapping deceased relative details.
+        deceased: set = set()
+        for s in active:
+            ent = s["entity"]
+            att = s["attribute"]
+            val = s.get("value", "").lower()
+            if (
+                att in _GRIEF_ATTRIBUTES
+                or any(v in val for v in _GRIEF_VALUES)
+                or "deceased" in ent.lower()
+            ):
+                deceased.add(ent)
+                if ent in _SPOUSE_TERMS:
+                    deceased.update(_SPOUSE_TERMS)
+
+        # Collect lowercase names of deceased entities that are proper nouns (not generic
+        # relationship terms) so we can also exclude cross-reference facts like
+        # "Rajan.spouse = Margaret" when Margaret is a known deceased entity.
+        _non_generic = deceased - _SPOUSE_TERMS - {"user", "deceased_relative", "family"}
+        deceased_names: set = {n.lower() for n in _non_generic if n and len(n) > 2}
+
         by_entity: dict[str, list[str]] = {}
         for s in active:
             entity = s["entity"]
+            if entity in deceased:
+                continue
+            # Also skip facts whose value names a deceased person (e.g. spouse = Margaret).
+            if any(name in s.get("value", "").lower() for name in deceased_names):
+                continue
             if _is_business_entity(entity):
                 continue
             if s["attribute"] in _SKIP_ATTRIBUTES:
+                continue
+            # Skip name=unknown — historical artefact that poisons the name field.
+            if s["attribute"] == "name" and s.get("value", "").lower() in ("unknown", "none", ""):
                 continue
             fact = f"{s['attribute']} = {s['value']}"
             by_entity.setdefault(entity, []).append(fact)
@@ -636,7 +719,7 @@ _GREETING_RE = re.compile(
 _AFFIRMATION_RE = re.compile(
     r"^\s*(ok|okay|yes|yeah|yep|yup|sure|alright|right|got it|gotcha|"
     r"no|nope|nah|fine|great|good|nice|cool|perfect|thanks|thank you|cheers|"
-    r"uh huh|mm+|hmm+)\s*[!.?]?\s*$",
+    r"uh huh|mm+|hmm+|hm+|huh|what|eh|oh|wow|really|seriously|come on|no way)\s*[!.?]?\s*$",
     re.IGNORECASE,
 )
 
@@ -658,6 +741,19 @@ def elara_chat(
         memory_context = f"{prefix}\n{memory_context}" if memory_context else prefix
     if grounding_block:
         memory_context = f"{grounding_block}\n\n{memory_context}" if memory_context else grounding_block
+
+    # Greeting: replace full context with just the user's name.
+    # Passing health/grief grounding on a simple "hey" causes Elara to open
+    # with unsolicited medical/bereavement references (Mistral ignores the
+    # "reference only when relevant" label in practice).
+    if reset_history:
+        name = next(
+            (f["value"] for f in (grounding_facts or [])
+             if f.get("attribute") == "name"
+             and f.get("value", "").lower() not in ("unknown", "none", "")),
+            None,
+        )
+        memory_context = f"The user's name is {name}." if name else None
 
     session = cache.get_session(speaker_id)
     if session:

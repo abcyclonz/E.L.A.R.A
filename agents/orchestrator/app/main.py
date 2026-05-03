@@ -254,7 +254,10 @@ def handle_input(req: AgentInput):
     # ── Step 1: Implicit style frustration check ───────────────────────────
     emotion = req.emotion
     if not emotion or emotion.lower() in ("none", "normal", "neutral", "unknown"):
-        if detect_style_frustration(req.text):
+        # Only run the LLM style-frustration check on messages long enough to carry
+        # implicit stylistic complaints (≥6 words).  Short messages and questions
+        # produce too many false positives (e.g. "so what were we saying" → frustrated).
+        if len(req.text.split()) >= 6 and detect_style_frustration(req.text):
             emotion = "frustrated"
             print("[Orchestrator] Style frustration injected → emotion=frustrated")
 
@@ -285,6 +288,18 @@ def handle_input(req: AgentInput):
             debug={"router_action": "DIRECT_CHAT", "router_reason": "gratitude affirmation"},
         )
 
+    # Explicit search/find requests directed at Elara → USE_TOOL | web_search.
+    # Small LLMs occasionally route "can you find X" to STORE_MEMORY on cold sessions.
+    _EXPLICIT_SEARCH_RE = re.compile(
+        r"^\s*(can you (search|find|look up|look for)|"
+        r"(search|find) (me |us |for |up )?|"
+        r"look (it |that |them )?(up|for me)|"
+        r"(what.?s|what is|where (is|are)) .{3,50}\b(today|now|near(by| me)|in [a-z ]{3,20})\b|"
+        r"find (me |us )?(some |a |an |nearby |the best )?[a-z ]{3,40}"
+        r"(near(by| me| [a-z]{3,20})|in [a-z ]{3,20}))",
+        re.IGNORECASE,
+    )
+
     # Reminder keyword short-circuits — small LLMs frequently mis-route these to STORE_MEMORY.
     _REMINDER_SET_RE = re.compile(
         r"\b(remind me|set a reminder|don.?t let me forget|"
@@ -300,8 +315,11 @@ def handle_input(req: AgentInput):
     # Elara-complaint messages → DIRECT_CHAT (small LLMs route these to STORE_MEMORY).
     _ELARA_COMPLAINT_RE = re.compile(
         r"\b(i already told you|you never remember|you.?re not listening|"
-        r"why do you keep|stop (talking|saying|asking)|you already asked|"
-        r"i.?ve said this|you.?re repeating|you don.?t listen)\b",
+        r"why do you keep|stop (talking|saying|asking|it|this|that)|you already asked|"
+        r"i.?ve said this|you.?re repeating|you don.?t listen|"
+        r"just stop|bro stop|i (didn.?t|never|haven.?t) said (that|this|any)|"
+        r"i never said|that.?s not what i said|what are you (even )?(talking|saying) about|"
+        r"you.?re (making this up|wrong about this)|i don.?t (know what|understand why) you.?re)\b",
         re.IGNORECASE,
     )
 
@@ -309,13 +327,20 @@ def handle_input(req: AgentInput):
     _MEMORY_QUESTION_RE = re.compile(
         r"^\s*(do you remember\b|can you recall\b|what do you (know|remember) about me\b|"
         r"what (have|did) i (tell|told) you\b|tell me what you (know|remember)\b|"
-        r"do you know (my|what i|where my|when i)\b)",
+        r"do you know (my|what i|where my|when i)\b|"
+        r"(so\s+)?what (were|was) (we|i) (saying|talking about|discussing|on about)\b|"
+        r"where were we\b|what (were|was) (we|i) (up to|on about)\b)",
         re.IGNORECASE,
     )
 
-    # Elara-opinion questions → DIRECT_CHAT (asking Elara's view, not user stating a fact).
+    # Elara-directed questions (opinion, wellbeing, etc.) → DIRECT_CHAT.
     _ELARA_OPINION_RE = re.compile(
-        r"^\s*what do you (think|feel|reckon) (of|about|regarding)\b",
+        r"^\s*(what do you (think|feel|reckon) (of|about|regarding)\b|"
+        r"how (have|are) you (been|doing|feeling|going)\b|"
+        r"how.?s your (day|week|morning|evening)\b|"
+        r"are you (ok(ay)?|alright|doing (ok|well|good))\b|"
+        r"what have you been up to\b|"
+        r"how are you (today|lately|these days)\b)",
         re.IGNORECASE,
     )
 
@@ -333,6 +358,39 @@ def handle_input(req: AgentInput):
         re.IGNORECASE,
     )
 
+    # Style preference requests → DIRECT_CHAT (not a storable personal fact).
+    _STYLE_FEEDBACK_RE = re.compile(
+        r"\b(speak (more )?(normally|naturally|simply|casually|like (a human|yourself))|"
+        r"talk (more )?(normally|naturally|simply|casually)|"
+        r"just (be |speak |talk )?(normal|natural|yourself|casual|relaxed|chill|simple|friendly)|"
+        r"stop being so (formal|stiff|robotic|weird|strange)|"
+        r"(too|very|so) (formal|stiff|robotic|weird|strange)|"
+        r"(be|act|sound) (more )?(normal|natural|casual|human|friendly|yourself))\b",
+        re.IGNORECASE,
+    )
+
+    # Implicit nearby-service search — "I could really use a coffee", "I could do with a taxi".
+    # These express a tangible want/need that maps to a nearby search, not a personal fact.
+    _IMPLICIT_SEARCH_RE = re.compile(
+        r"\b(i could (really )?use (a |an |some )?|i could do with (a |an |some )?|"
+        r"i('m| am) (really |so )?(craving|desperate for|dying for) (a |an |some )?)"
+        r"(coffee|tea|food|pizza|burger|sandwich|snack|meal|breakfast|lunch|dinner|"
+        r"taxi|cab|doctor|pharmacy|chemist|hospital|bakery|cafe|restaurant|shop|store|"
+        r"drink|beer|juice|water|ice cream)\b",
+        re.IGNORECASE,
+    )
+
+    # Tool-search correction — "oh sorry I meant restaurants, not hotels" after a prior USE_TOOL turn.
+    # Detected only when the last router action was USE_TOOL to avoid false-positives on fact corrections.
+    _TOOL_CORRECTION_RE = re.compile(
+        r"\b((oh |so )?sorry[,]?\s+i meant|no[,]?\s+i meant|i meant .{1,40} not |"
+        r"actually (search for|find|look for)|not (hotels?|restaurants?|cafes?|shops?|hospitals?)"
+        r"[,]?\s+i meant)\b",
+        re.IGNORECASE,
+    )
+
+    _last_action = cache.get_last_action(speaker_id)
+
     # Greetings → DIRECT_CHAT, skip memory entirely (also triggers history reset).
     if _GREETING_RE.match(req.text.strip()):
         decision = RouteDecision("DIRECT_CHAT", "greeting")
@@ -341,12 +399,21 @@ def handle_input(req: AgentInput):
     elif _AFFIRMATION_RE.match(req.text.strip()):
         decision = RouteDecision("DIRECT_CHAT", "short affirmation")
         print("[Orchestrator] Affirmation short-circuit → DIRECT_CHAT")
+    elif _EXPLICIT_SEARCH_RE.match(req.text.strip()):
+        decision = RouteDecision("USE_TOOL", "explicit search/find directed at Elara", tool="web_search")
+        print("[Orchestrator] Explicit search short-circuit → USE_TOOL | web_search")
     elif _REMINDER_SET_RE.search(req.text):
         decision = RouteDecision("USE_TOOL", "reminder keyword", tool="reminder")
         print("[Orchestrator] Reminder short-circuit → USE_TOOL | reminder")
     elif _REMINDER_LIST_RE.search(req.text):
         decision = RouteDecision("USE_TOOL", "list reminders keyword", tool="reminder")
         print("[Orchestrator] List-reminders short-circuit → USE_TOOL | reminder")
+    elif _TOOL_CORRECTION_RE.search(req.text) and _last_action == "USE_TOOL":
+        decision = RouteDecision("USE_TOOL", "correction of prior tool search", tool="web_search")
+        print("[Orchestrator] Tool-correction short-circuit → USE_TOOL | web_search")
+    elif _IMPLICIT_SEARCH_RE.search(req.text):
+        decision = RouteDecision("USE_TOOL", "implicit nearby-service search", tool="web_search")
+        print("[Orchestrator] Implicit search short-circuit → USE_TOOL | web_search")
     elif _ELARA_COMPLAINT_RE.search(req.text):
         decision = RouteDecision("DIRECT_CHAT", "Elara complaint — handle empathetically")
         print("[Orchestrator] Complaint short-circuit → DIRECT_CHAT")
@@ -362,6 +429,9 @@ def handle_input(req: AgentInput):
     elif _SOCIAL_POSITIVE_RE.search(req.text):
         decision = RouteDecision("DIRECT_CHAT", "positive social feedback")
         print("[Orchestrator] Social positive short-circuit → DIRECT_CHAT")
+    elif _STYLE_FEEDBACK_RE.search(req.text):
+        decision = RouteDecision("DIRECT_CHAT", "style preference request")
+        print("[Orchestrator] Style feedback short-circuit → DIRECT_CHAT")
     else:
         decision = route(req.text, emotion, recent_turns=_recent_turns)
     print(f"[Orchestrator] Route → {decision.action} | {decision.reason}")
@@ -431,6 +501,9 @@ def handle_input(req: AgentInput):
     # ── Step 6: Trigger conversation summarization every N turns ──────────
     last_turns = elara_result.get("last_turns", [])
     maybe_summarize(speaker_id, last_turns)
+
+    # Persist the router action so the next turn can detect tool corrections.
+    cache.set_last_action(speaker_id, decision.action)
 
     # ── Step 6: Build response ─────────────────────────────────────────────
     active_states = snapshot.get("active_states", []) if snapshot else []
