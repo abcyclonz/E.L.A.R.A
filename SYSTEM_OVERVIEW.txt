@@ -9,6 +9,25 @@
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
+[2026-05-06]  RunPod migration — Docker Compose fixed for single-pod deployment
+────────────────────────────────────────────────────────────────────────────────
+
+RUNPOD MIGRATION  (docker-compose.yml)
+  • Added ollama service (ollama/ollama image) with nvidia GPU reservation,
+    persistent ollama_models volume, and healthcheck on /api/tags.
+  • Fixed OLLAMA_URL hardcoded to host bridge IP (172.17.0.1:11434) in all
+    three services (memory_agent, elara, orchestrator) → now
+    ${OLLAMA_URL:-http://ollama:11434} so RunPod env var or default works.
+  • Fixed OLLAMA_MODEL similarly to ${OLLAMA_MODEL:-mistral:latest}.
+  • Added ollama healthcheck dependency to memory_agent, elara, orchestrator
+    so no service starts Ollama requests before the server is ready.
+  • NOTE: First start requires model pull after stack is up:
+      docker exec ollama ollama pull mistral:latest
+    Subsequent restarts use the ollama_models volume (no re-download needed).
+  • All secrets (TAVILY_API_KEY, GMAIL_APP_PASSWORD, JWT_SECRET_KEY, etc.)
+    set as env vars in RunPod pod settings — not in .env files on the pod.
+
+────────────────────────────────────────────────────────────────────────────────
 [2026-05-03]  Full system test + 8-bug fix pass — routing, grief, filter depth
 ────────────────────────────────────────────────────────────────────────────────
 

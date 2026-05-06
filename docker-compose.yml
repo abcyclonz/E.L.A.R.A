@@ -31,6 +31,27 @@ services:
       timeout: 5s
       retries: 5
 
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
   memory_agent:
     build: ./agents/memory
     container_name: memory_agent
@@ -38,13 +59,15 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://memory_user:memory_pass@db:5432/memory_db
-      OLLAMA_URL: http://172.17.0.1:11434
-      OLLAMA_MODEL: mistral:latest
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral:latest}
       REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     volumes:
       - ./agents/memory/app:/app/app
@@ -56,11 +79,14 @@ services:
     ports:
       - "8002:8002"
     environment:
-      OLLAMA_URL: http://172.17.0.1:11434
-      OLLAMA_MODEL: mistral:latest
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral:latest}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
       ALERT_FROM_EMAIL: ${ALERT_FROM_EMAIL:-}
       ALERT_TO_EMAIL: ${ALERT_TO_EMAIL:-}
+    depends_on:
+      ollama:
+        condition: service_healthy
     volumes:
       - elara_bandit_tables:/app/tables
       - ./agents/elara/conversation_agent:/app/conversation_agent
@@ -98,8 +124,8 @@ services:
     environment:
       MEMORY_AGENT_URL: http://memory_agent:8000
       ELARA_URL: http://elara:8002
-      OLLAMA_URL: http://172.17.0.1:11434
-      OLLAMA_MODEL: mistral:latest
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral:latest}
       WEB_SEARCH_MCP_URL: http://web_search_tool:8010
       ASSISTANT_MCP_URL: http://assistant_tool:8011
       TAVILY_API_KEY: ${TAVILY_API_KEY:-}
@@ -111,6 +137,7 @@ services:
       - web_search_tool
       - assistant_tool
       - redis
+      - ollama
     volumes:
       - ./agents/orchestrator/app:/app/app
       - auth_data:/app/data
@@ -135,3 +162,4 @@ volumes:
   assistant_data:
   redis_data:
   auth_data:
+  ollama_models:
