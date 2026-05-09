@@ -1,10 +1,18 @@
+import hmac
+import os
 import re
 import httpx
 import requests as _requests
-from fastapi import FastAPI, HTTPException
+import random
+import time
+import redis
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.models import AgentInput, OrchestrationResult
 from app.agents import (
     route, store_and_retrieve, retrieve_only, elara_chat,
@@ -247,7 +255,16 @@ def handle_input(req: AgentInput):
     grounding_facts = fetch_grounding(speaker_id)
 
     # Derive user location: GPS city from request metadata (web frontend) OR memory-stored location.
-    user_location = (req.metadata or {}).get("location") or _location_from_grounding(grounding_facts)
+    ul = _requests.get("https://ipinfo.io/json").json()
+    city = ul.get('city')
+    region = ul.get('region')
+    if city and region:
+        user_location = f"{city}, {region}"
+    else:
+        user_location = None
+
+    # 3. Now the 'or' fallback will work correctly
+    user_location = user_location or _location_from_grounding(grounding_facts)
     if user_location:
         print(f"[Location] Using: {user_location}")
 
@@ -543,3 +560,131 @@ def _build_memory_payload(req: AgentInput, emotion: str = None) -> dict:
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "orchestrator", "version": "4.0.0"}
+
+# ---------------------------------------------------------------------------
+# App & rate-limiter setup
+# ---------------------------------------------------------------------------
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+SHARED_SECRET: str = os.getenv("SHARED_SECRET", "your_shared_secret_key_123")
+REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
+
+r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def verify_api_key(x_api_key: str) -> None:
+    if not hmac.compare_digest(x_api_key, SHARED_SECRET):
+        raise HTTPException(status_code=403, detail="Forbidden: invalid API key")
+
+
+def redis_set(key: str, value: str, ex: int) -> None:
+    try:
+        r.set(key, value, ex=ex)
+    except redis.RedisError as e:
+        raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
+
+
+def redis_get(key: str) -> bytes | None:
+    try:
+        return r.get(key)
+    except redis.RedisError as e:
+        raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
+
+
+def redis_delete(key: str) -> None:
+    try:
+        r.delete(key)
+    except redis.RedisError as e:
+        raise HTTPException(status_code=503, detail=f"Storage unavailable: {e}")
+
+
+def otp_key(user_id: str) -> str:
+    return f"otp:{user_id}"
+
+
+def status_key(user_id: str) -> str:
+    return f"status:{user_id}"
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
+class OTPData(BaseModel):
+    otp: str
+    user_id: str = "USER_01"       # ← updated
+    expires_in: int = 300
+
+
+class VerifyOtpRequest(BaseModel):
+    user_id: str = "USER_01"       # ← updated
+    user_input_otp: str
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@app.post("/sync-otp")
+async def sync_otp(data: OTPData, x_api_key: str = Header(...)):
+    """Called by the Pi to push a fresh OTP."""
+    verify_api_key(x_api_key)
+
+    ttl = max(10, min(data.expires_in, 3600))
+    redis_set(otp_key(data.user_id), data.otp, ex=ttl)
+
+    # Clear any previous verified status when a new OTP is synced
+    redis_delete(status_key(data.user_id))
+
+    return {"status": "success"}
+
+
+@app.post("/verify-otp")
+@limiter.limit("5/minute")
+async def verify_otp(request: Request, data: VerifyOtpRequest):
+    """Called by the frontend to verify the OTP the user entered."""
+    stored_bytes = redis_get(otp_key(data.user_id))
+
+    if stored_bytes is None:
+        raise HTTPException(status_code=404, detail="OTP expired or not found")
+
+    stored_otp = stored_bytes.decode("utf-8")
+
+    if hmac.compare_digest(data.user_input_otp, stored_otp):
+        redis_delete(otp_key(data.user_id))
+
+        # Set verified flag for Pi to detect — expires in 60s
+        redis_set(status_key(data.user_id), "verified", ex=60)
+
+        return {"status": "verified"}
+
+    raise HTTPException(status_code=401, detail="Invalid OTP")
+
+
+@app.get("/connection-status")
+async def connection_status(
+    user_id: str = "USER_01",      # ← updated
+    x_api_key: str = Header(...)
+):
+    """
+    Called by the Pi to check if the frontend verified the OTP.
+    One-shot: returns verified=True once, then clears the flag.
+    """
+    verify_api_key(x_api_key)
+
+    status_bytes = redis_get(status_key(user_id))
+
+    if status_bytes and status_bytes.decode("utf-8") == "verified":
+        redis_delete(status_key(user_id))
+        return {"verified": True}
+
+    return {"verified": False}
