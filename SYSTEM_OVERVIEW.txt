@@ -9,6 +9,71 @@
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
+[2026-05-09]  Vision channel — Eye + Perception Monitor + Perception Learner
+────────────────────────────────────────────────────────────────────────────────
+
+NEW — Eye  (Face_login_Elara-master/, Raspberry Pi 5)
+  • Added the physical "eye" of the system: a Raspberry Pi 5 running a FastAPI
+    camera service on port 8765.
+  • Face detection at 20fps via OpenCV Haar cascade; tracked face drives
+    pan-tilt servo camera via PID controller → ESP32 over USB serial (115200 baud).
+  • dlib face encoding (every 3s) confirms identity against registered users.
+  • Face encodings stored in faces/db.json; registered via browser UI at /.
+  • Two modes: Pi mode (picamera2) and laptop mode (browser-injected frames).
+  • Key endpoint: GET /frames/event — returns current frame (base64), bounding
+    box, identified user name, and face position as a single JSON payload.
+  • Falls back to servo simulation if no ESP32 is connected.
+
+NEW — Perception Monitor  (Face_login_Elara-master/monitor.py, runs on RunPod)
+  • Polls GET /frames/event from the Pi every MONITOR_PERIOD_S seconds (default 60s).
+  • Three-stage perception analysis pipeline on each frame:
+      1. HSEmotion (EfficientNet-B0, ONNX): face crop → 8-class emotion scores
+         Labels: anger, contempt, disgust, fear, happiness, neutral, sadness, surprise
+      2. Moondream VLM (Ollama): full frame → natural language scene description
+         (describes surroundings only — not the user's face or expression)
+      3. Mistral LLM (Ollama): emotion + scene + previous snapshot → structured JSON
+         including emotion_affected_by_scene (bool), reason, summary
+  • Smart deduplication before writing: only records a row if emotion changed,
+    affected flag flipped, or >50% of scene subjects swapped (Jaccard < 0.5).
+    Prevents thousands of identical rows per day.
+  • Writes to timeline.db (SQLite) in the perception_data Docker volume.
+  • Only processes frames where an identified (named) user is present — skips Unknown.
+
+NEW — Perception Learner  (agents/perception_learner/, port 8012)
+  • Passive background agent — completely decoupled from the live conversation.
+    DOES NOT interact with Elara, Orchestrator, or the NLP pipeline.
+    SEPARATE from Elara's learning system (which handles conversation preferences).
+  • What it does: fuses what the camera SAW with what the user SAID in conversations
+    to generate richer episodic memories that neither source alone would produce.
+  • Poll loop (every POLL_INTERVAL_S seconds, default 600):
+      1. Reads new rows from timeline.db since last processed snapshot ID.
+      2. For each new snapshot: calls memory_agent:8000/retrieve with the
+         user + scene/subjects as query context.
+      3. If no relevant memory found → SKIP (nothing to cross-reference).
+      4. Sends snapshot + memory context to Mistral (Ollama) with cross-modal
+         reasoning prompt. LLM returns one grounded inference sentence or SKIP.
+      5. If inference generated: calls memory_agent:8000/process → stored as
+         an EVENT memory. Indistinguishable from conversation-derived events;
+         retrieved naturally by the Orchestrator on future turns.
+  • Example inference: memory has "user's son is tall" + camera sees "tall person
+    holding a basketball" + user is happy → stored: "User appeared happy while
+    their tall son was present in the scene holding a basketball."
+  • State tracking: own SQLite (learner_state.db) records every processed
+    snapshot ID + the inference text (null if SKIP). Survives container restarts.
+  • Debug endpoints:
+      POST /debug/inject_snapshot — write a test row into timeline.db directly
+      POST /debug/trigger         — force one immediate poll cycle, return results
+  • Test coverage: Scenario 10 in analysis_test.py exercises the full flow —
+    injects a snapshot for George (sad near roses + photographs), triggers the
+    learner, verifies the inference connected to his known grief over his late wife.
+
+DOCKER COMPOSE CHANGES
+  • Added perception_monitor service (builds from Face_login_Elara-master/Dockerfile.monitor)
+  • Added perception_learner service (builds from agents/perception_learner/)
+  • Added perception_data volume (shared between monitor and learner for timeline.db)
+  • Added learner_state volume (perception_learner's own processed-ID tracker)
+
+────────────────────────────────────────────────────────────────────────────────
 [2026-05-06]  RunPod migration — Docker Compose fixed for single-pod deployment
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -297,31 +362,51 @@ across conversations, learns how to communicate based on the user's emotional
 state, and can search the web, set reminders, and manage calendar events — all
 through natural voice conversation.
 
-Full pipeline:
-  Microphone
-    → VAD (silence detection)
-    → STT (speech-to-text) + Speaker ID (who is talking)
-    → Orchestrator (routes the message)
-    → Memory Agent (stores / retrieves personal facts)
-    → Tool Servers (web search, reminders, calendar)
-    → Elara Conversation Agent (generates reply)
-    → TTS (text-to-speech output)
+ELARA also has a physical eye: a Raspberry Pi camera that watches, identifies
+the user, reads their emotion, understands the scene around them, and uses that
+to enrich memory with insights that conversation alone would never produce.
+
+Two parallel channels feed a shared memory store:
+
+  VOICE CHANNEL (real-time):
+    Microphone
+      → VAD (silence detection)
+      → STT (speech-to-text) + Speaker ID (who is talking)
+      → Orchestrator (routes the message)
+      → Memory Agent (stores / retrieves personal facts)
+      → Tool Servers (web search, reminders, calendar)
+      → Elara Conversation Agent (generates reply)
+      → TTS (text-to-speech output)
+
+  VISION CHANNEL (passive, background — never blocks conversation):
+    Raspberry Pi camera
+      → Face detection + pan-tilt tracking (Eye service, Pi)
+      → Identity confirmed → frame sent to RunPod
+      → Perception Monitor (emotion + scene analysis via Ollama)
+      → timeline.db (SQLite, shared Docker volume)
+      → Perception Learner (cross-modal reasoning every 10 min)
+      → Memory Agent (stores grounded inferences as EVENT memories)
+      ↓
+    Same memory store the Orchestrator reads on every voice turn
 
 
 ================================================================================
   SERVICES
 ================================================================================
 
-  Service            Port   Description
-  ─────────────────  ─────  ────────────────────────────────────────────────────
-  Memory Agent       8000   PostgreSQL + pgvector — stores all user memory
-  Orchestrator       8001   LLM router + workflow coordinator
-  Elara Agent        8002   Conversation engine with personality & affect
-  Web Search Tool    8010   MCP server wrapping Tavily search API
-  Assistant Tool     8011   MCP server — reminders & calendar (SQLite + Google)
-  PostgreSQL         5432   pgvector/pg16 — backing store for memory agent
-  Redis              6379   Per-speaker session state (survives restarts)
-  Frontend           3000   Web UI (Next.js)
+  Service              Port   Description
+  ───────────────────  ─────  ──────────────────────────────────────────────────
+  Memory Agent         8000   PostgreSQL + pgvector — stores all user memory
+  Orchestrator         8001   LLM router + workflow coordinator
+  Elara Agent          8002   Conversation engine with personality & affect
+  Web Search Tool      8010   MCP server wrapping Tavily search API
+  Assistant Tool       8011   MCP server — reminders & calendar (SQLite + Google)
+  Perception Learner   8012   Cross-modal inference: vision × memory → EVENTs
+  PostgreSQL           5432   pgvector/pg16 — backing store for memory agent
+  Redis                6379   Per-speaker session state (survives restarts)
+  Frontend             3000   Web UI (Next.js)
+  Perception Monitor   —      Pulls frames from Pi, runs emotion+scene analysis
+  Eye (Raspberry Pi)   8765   Camera, face tracking, pan-tilt servos, identity
 
 
 ================================================================================
@@ -584,6 +669,77 @@ Full pipeline:
 
   Next.js web UI served on port 3000.
   Connects to orchestrator /chat endpoint (auth-gated).
+  OTP verification flow: verify-otp page + otpverify component (recently added).
+
+
+────────────────────────────────────────────────────────────────────────────────
+7. VISION PIPELINE  (Face_login_Elara-master/ + agents/perception_learner/)
+────────────────────────────────────────────────────────────────────────────────
+
+  7a. EYE SERVICE  (Raspberry Pi 5, port 8765)
+
+    • FastAPI server — camera feed, face registration/login, tracking status.
+    • Face registration: browser UI captures 3+ frames → dlib extracts 128D
+      face encodings → stored in faces/db.json.
+    • Face login: incoming frame matched against db.json; on match, tracker is
+      told who is present (tracker.set_identified_person(name)).
+    • FaceTracker runs two daemon threads:
+        Main loop (20fps): Haar cascade → detect largest face → compute PID
+          error (offset from frame centre) → send angle delta to ESP32 servo.
+        Recognition loop (every 3s): dlib face encoding → cosine match against
+          identified user → update identified_present flag.
+    • PID controller: discrete P+I+D with anti-windup + deadband (30px).
+      Pan/tilt servo limits: 30°–150° each (90° = centre).
+    • ESP32 firmware: receives "P<pan> T<tilt>\n" over serial → PWM servo.
+      Falls back to simulate mode (tracks angle state only) if no ESP32.
+    • Key endpoints:
+        GET /frames/event  — JSON: frame_b64, person, box, position,
+                             identified_name, identified_present
+        GET /track/stream  — MJPEG live feed with HUD overlay
+        POST /login        — match face → returns name + confidence
+        POST /register     — store new face encodings
+
+  7b. PERCEPTION MONITOR  (RunPod Docker service, perception_data volume)
+
+    • Pulls GET /frames/event from Pi every MONITOR_PERIOD_S seconds.
+    • Only processes frames where identified_present = True and user ≠ Unknown.
+    • Three-stage pipeline:
+        Stage 1 — HSEmotion (enet_b0_8_best_afew, ONNX):
+          Crops face from bounding box (±20px padding) or centre fallback.
+          Outputs dominant emotion + 8-class probability distribution.
+        Stage 2 — Moondream VLM (Ollama):
+          Encodes full frame as base64 JPEG; prompts model to describe only
+          surroundings (objects, people, environment) — not the user's face.
+        Stage 3 — Mistral LLM (Ollama):
+          Combines emotion scores + scene description + previous snapshot
+          → structured JSON: emotion, confidence, emotion_scores,
+            scene_description, subjects (up to 5), emotion_affected_by_scene,
+            reason, summary.
+    • Deduplication: writes to timeline.db only if emotion changed, affected
+      flag flipped, or Jaccard similarity of subjects < 0.5 (>50% changed).
+    • timeline.db lives in perception_data Docker volume at /app/faces/timeline.db.
+
+  7c. PERCEPTION LEARNER  (agents/perception_learner/, port 8012)
+
+    • Entirely passive — zero interaction with live conversation pipeline.
+      Separate from Elara's preference-learning system.
+    • Goal: generate memories that require BOTH vision (what was seen) AND
+      conversation (what is known) to produce — neither alone is enough.
+    • Poll cycle (every POLL_INTERVAL_S seconds, default 600s):
+        1. Read new rows from timeline.db (id > last_processed_id).
+        2. For each snapshot: call memory_agent /retrieve with user + scene
+           subjects as query → get relevant facts, beliefs, recent events.
+        3. If no memory context found → mark SKIP, move on.
+        4. Build cross-modal reasoning prompt → send to Mistral (Ollama).
+           LLM returns one grounded inference sentence or the word SKIP.
+        5. If inference returned: call memory_agent /process with the
+           inference text → stored as EVENT memory with metadata:
+           {source: "perception_learner", snapshot_id: N, snapshot_ts: T}
+    • State DB (learner_state.db in learner_state volume):
+        processed table: snapshot_id | processed_at | inference (nullable)
+        Guarantees each snapshot is reasoned over exactly once.
+    • Graceful degradation: if timeline.db doesn't exist yet (monitor not
+      started), learner silently waits; if memory_agent unreachable, SKIP.
 
 
 ================================================================================
@@ -613,6 +769,11 @@ Full pipeline:
   _MIN_TURNS_GAP             elara/curiosity_agent/injector.py     4 turns
   _BASE_PROB                 elara/curiosity_agent/injector.py     0.28 (28%)
   proactive_receptiveness    SessionState (per session)            starts 0.7 (EMA)
+  DEAD_ZONE_PX               Face_login_Elara-master/config.py     30px (servo deadband)
+  IDENTITY_CHECK_INTERVAL_S  Face_login_Elara-master/config.py     3.0s
+  IDENTITY_TOLERANCE         Face_login_Elara-master/config.py     0.50
+  MONITOR_PERIOD_S           env var                               60s
+  POLL_INTERVAL_S            env var                               600s (10 min)
 
 
 ================================================================================
@@ -624,6 +785,14 @@ Full pipeline:
   ALERT_FROM_EMAIL      — Gmail address to send caregiver alerts FROM
   ALERT_TO_EMAIL        — caregiver address(es), comma-separated
   CALENDAR_TIMEZONE     — default: Asia/Kolkata
+
+  Vision channel:
+  PI_URL                — Raspberry Pi address for perception_monitor
+                          e.g. http://192.168.1.42:8765
+  MONITOR_PERIOD_S      — how often perception_monitor pulls a frame (default 60)
+  POLL_INTERVAL_S       — how often perception_learner checks for new snapshots (default 600)
+  ANALYZER_VLM_MODEL    — Ollama model for scene description (default: moondream)
+  ANALYZER_LLM_MODEL    — Ollama model for perception reasoning (default: mistral:latest)
 
 
 ================================================================================
@@ -643,6 +812,12 @@ Full pipeline:
     still not implemented — would require APScheduler + server-push to frontend
   • Caregiver email: currently only fires on distress watchdog; no free-form
     email composition on behalf of the user
+  • Eye face encodings: faces/db.json on the Pi is not backed up — re-registration
+    needed if Pi is wiped or reimaged
+  • Perception learner bulk catch-up: if many snapshots accumulate before the
+    learner first runs, all are processed in one burst with no rate limiting
+  • Cross-user perception: perception_learner only reasons per identified user;
+    no cross-user inferences are ever made (intentional — privacy by design)
 
 
 ================================================================================
