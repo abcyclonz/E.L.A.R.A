@@ -156,6 +156,43 @@ services:
       NODE_ENV: production
       BACKEND_URL: http://orchestrator:8001
 
+  perception_monitor:
+    build:
+      context: ./Face_login_Elara-master
+      dockerfile: Dockerfile.monitor
+    container_name: perception_monitor
+    environment:
+      PI_URL: ${PI_URL:-http://localhost:8765}
+      MONITOR_PERIOD_S: ${MONITOR_PERIOD_S:-60}
+      OLLAMA_BASE_URL: ${OLLAMA_URL:-http://ollama:11434}
+      ANALYZER_VLM_MODEL: ${ANALYZER_VLM_MODEL:-moondream}
+      ANALYZER_LLM_MODEL: ${ANALYZER_LLM_MODEL:-mistral:latest}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - perception_data:/app/faces
+
+  perception_learner:
+    build: ./agents/perception_learner
+    container_name: perception_learner
+    ports:
+      - "8012:8012"
+    environment:
+      MEMORY_AGENT_URL: http://memory_agent:8000
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral:latest}
+      PERCEPTION_DB_PATH: /data/perception/timeline.db
+      POLL_INTERVAL_S: ${POLL_INTERVAL_S:-600}
+    depends_on:
+      - memory_agent
+      - ollama
+      - perception_monitor
+    volumes:
+      - perception_data:/data/perception:ro
+      - learner_state:/data
+    command: uvicorn main:app --host 0.0.0.0 --port 8012
+
 volumes:
   postgres_data:
   elara_bandit_tables:
@@ -163,3 +200,5 @@ volumes:
   redis_data:
   auth_data:
   ollama_models:
+  perception_data:
+  learner_state:

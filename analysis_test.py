@@ -8,9 +8,10 @@ Runs against the orchestrator at :8001 (full pipeline).
 import json, time, textwrap
 import requests
 
-ORCHESTRATOR = "http://localhost:8001"
-ELARA        = "http://localhost:8002"
-SPEAKER      = "User_1"
+ORCHESTRATOR      = "http://localhost:8001"
+ELARA             = "http://localhost:8002"
+PERCEPTION_LEARNER = "http://localhost:8012"
+SPEAKER           = "User_1"
 
 RESET   = "\033[0m"; BOLD = "\033[1m"; DIM = "\033[2m"
 CYAN    = "\033[36m"; GREEN = "\033[32m"; YELLOW = "\033[33m"
@@ -236,6 +237,111 @@ turn("What do you think of gardening?", r, "DIRECT_CHAT")
 time.sleep(1)
 
 
+# ── SCENARIO 10: Perception Learner — cross-modal inference ──────────────────
+scenario(10, "Perception Learner — vision × memory → new EVENT")
+
+print(f"\n{DIM}  This scenario bypasses the voice pipeline. It injects a fake camera")
+print(f"  snapshot into timeline.db, triggers one learner poll, then checks")
+print(f"  whether a grounded inference was stored in memory.{RESET}\n")
+
+PERCEPTION_LEARNER = "http://localhost:8012"
+
+def perception_health():
+    try:
+        r = requests.get(f"{PERCEPTION_LEARNER}/health", timeout=5)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def inject_snapshot(snap: dict):
+    try:
+        r = requests.post(f"{PERCEPTION_LEARNER}/debug/inject_snapshot",
+                          json=snap, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def trigger_poll():
+    try:
+        r = requests.post(f"{PERCEPTION_LEARNER}/debug/trigger",
+                          timeout=180)   # LLM call can take time
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+# 10.1 — check the service is up
+print(f"{BOLD}[10.1] Perception Learner health check{RESET}")
+h = perception_health()
+if "error" in h:
+    print(f"  {RED}SKIP — perception_learner not reachable: {h['error']}{RESET}")
+    print(f"  {DIM}(start the full stack with: docker compose up){RESET}")
+    issues.append("perception_learner unreachable — skipped scenario 10")
+else:
+    db_ok = h.get("perception_db_ok", False)
+    print(f"  status         : {GREEN}ok{RESET}")
+    print(f"  perception_db  : {h.get('perception_db')}")
+    print(f"  db exists      : {'yes' if db_ok else DIM+'not yet (will be created on inject)'+RESET}")
+    print(f"  last processed : #{h.get('last_processed_id', 0)}")
+
+    # 10.2 — inject a snapshot that should connect with George's memories
+    # George told us: wife loved roses, garden has roses, wife passed away 3 years ago
+    # Camera sees: him looking sad near roses and photographs → reasoner should link them
+    print(f"\n{BOLD}[10.2] Inject test perception snapshot for User_1 (George){RESET}")
+    snap = {
+        "user":             SPEAKER,
+        "ts":               "2024-06-01T18:30:00+00:00",
+        "emotion":          "sadness",
+        "confidence":       0.84,
+        "scene":            "A vase of red roses on a side table next to framed family photographs",
+        "subjects":         ["red roses", "framed photographs", "side table"],
+        "emotion_affected": True,
+        "reason":           "User appears moved while looking at the roses and family photos",
+        "summary":          "User looked sad near roses and family photographs",
+    }
+    inj = inject_snapshot(snap)
+    if "error" in inj:
+        print(f"  {RED}inject failed: {inj['error']}{RESET}")
+        issues.append(f"perception inject failed: {inj['error']}")
+    else:
+        print(f"  {GREEN}snapshot injected → id #{inj['snapshot_id']}{RESET}")
+        print(f"  emotion  : {snap['emotion']}")
+        print(f"  scene    : {snap['scene']}")
+        print(f"  subjects : {snap['subjects']}")
+
+        # 10.3 — trigger one immediate poll
+        print(f"\n{BOLD}[10.3] Trigger learner poll (calls Ollama — may take ~30s){RESET}")
+        poll = trigger_poll()
+        if "error" in poll:
+            print(f"  {RED}trigger failed: {poll['error']}{RESET}")
+            issues.append(f"perception trigger failed: {poll['error']}")
+        else:
+            processed = poll.get("processed", 0)
+            results   = poll.get("results", [])
+            print(f"  snapshots processed : {processed}")
+            for res in results:
+                stored    = res.get("stored", False)
+                inference = res.get("inference") or "(none — SKIP)"
+                color     = GREEN if stored else DIM
+                tag       = "STORED IN MEMORY" if stored else "SKIPPED"
+                print(f"\n  snapshot #{res['snapshot_id']}  {res['user']}  {res['emotion']}")
+                print(f"  {color}{tag}{RESET}")
+                if stored:
+                    print(f"  inference: {GREEN}{inference}{RESET}")
+                else:
+                    print(f"  {DIM}{inference}{RESET}")
+
+                if not stored:
+                    issues.append(
+                        f"perception_learner produced no inference for snapshot "
+                        f"#{res['snapshot_id']} — check memory context or LLM response"
+                    )
+
+time.sleep(1)
+
+
 # ── SUMMARY ───────────────────────────────────────────────────────────────────
 header("ANALYSIS SUMMARY")
 
@@ -253,4 +359,5 @@ print(f"  {DIM}• Affect detection correctness{RESET}")
 print(f"  {DIM}• Tool call results{RESET}")
 print(f"  {DIM}• Elara's handling of grief context (scenario 5){RESET}")
 print(f"  {DIM}• Curiosity/proactive questions appearing in later turns{RESET}")
+print(f"  {DIM}• Perception inference quality (scenario 10) — did it connect roses/photos to George's late wife?{RESET}")
 print()

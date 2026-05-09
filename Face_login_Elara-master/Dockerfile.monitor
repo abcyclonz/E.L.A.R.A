@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    opencv-python-headless \
+    httpx \
+    numpy \
+    hsemotion-onnx
+
+COPY analyzer.py timeline.py monitor.py ./
+
+# timeline.db written to /app/faces/timeline.db — shared via Docker volume
+RUN mkdir -p faces
+
+CMD ["python", "monitor.py"]
