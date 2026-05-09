@@ -342,11 +342,27 @@ def handle_input(req: AgentInput):
 
     # Memory retrieval questions → RETRIEVE_MEMORY (small LLMs mis-route these to STORE_MEMORY).
     _MEMORY_QUESTION_RE = re.compile(
-        r"^\s*(do you remember\b|can you recall\b|what do you (know|remember) about me\b|"
-        r"what (have|did) i (tell|told) you\b|tell me what you (know|remember)\b|"
+        r"^\s*("
+        # "do you remember / recall / know" style
+        r"do you remember\b|can you recall\b|"
+        r"what do you (know|remember) about me\b|"
+        r"what (have|did) i (tell|told) you\b|"
+        r"tell me what you (know|remember)\b|"
         r"do you know (my|what i|where my|when i)\b|"
         r"(so\s+)?what (were|was) (we|i) (saying|talking about|discussing|on about)\b|"
-        r"where were we\b|what (were|was) (we|i) (up to|on about)\b)",
+        r"where were we\b|what (were|was) (we|i) (up to|on about)\b|"
+        # Direct "what is my X?" questions about own attributes
+        r"what (is|are|was|were) my [a-z]|"
+        r"where (do|did) i (live|stay|work|come from|grow up)\b|"
+        # "who is [person name]?" — personal contact lookup (not articles/pronouns)
+        r"who is (?!the\b|a\b|an\b|he\b|she\b|it\b|my\b)[a-z]{2,25}\b|"
+        # "tell me about [person/topic]"
+        r"tell me (more )?about (my\b|(?!the\b|a\b|an\b|it\b)[a-z]{2,25}\b)|"
+        # "does [person] like/do/know?" — asking about stored contact
+        r"does (?!the\b|a\b|an\b|he\b|she\b|it\b)[a-z]{2,25} (like|love|hate|have|do|know|play|work|live|enjoy)\b|"
+        # "what does [person] do/like?"
+        r"what does (?!the\b|a\b|an\b)[a-z]{2,25} (do|like|work|play|know|enjoy)\b"
+        r")",
         re.IGNORECASE,
     )
 
@@ -358,6 +374,15 @@ def handle_input(req: AgentInput):
         r"are you (ok(ay)?|alright|doing (ok|well|good))\b|"
         r"what have you been up to\b|"
         r"how are you (today|lately|these days)\b)",
+        re.IGNORECASE,
+    )
+
+    # Simple arithmetic → always DIRECT_CHAT (LLMs sometimes route these to USE_TOOL).
+    _MATH_RE = re.compile(
+        r"^\s*(what\s+(is|are)\s+)?[\d\s\.\+\-\*\/\^]+[\+\-\*\/\^][\d\s\.\+\-\*\/\^\(\)]+[\?]?\s*$|"
+        r"\bwhat\s+(is|are)\s+\d+\s*[\+\-\×\÷\*\/]\s*\d+|"
+        r"\bwhat\s+(is|are)\s+\d+\s*(plus|minus|times|divided by|percent of)\s*\d+\b|"
+        r"\bhow\s+many\s+(days?|hours?|minutes?|seconds?|weeks?|months?)\s+(in|per)\s+a?\s*\w+\b",
         re.IGNORECASE,
     )
 
@@ -449,6 +474,9 @@ def handle_input(req: AgentInput):
     elif _STYLE_FEEDBACK_RE.search(req.text):
         decision = RouteDecision("DIRECT_CHAT", "style preference request")
         print("[Orchestrator] Style feedback short-circuit → DIRECT_CHAT")
+    elif _MATH_RE.match(req.text.strip()):
+        decision = RouteDecision("DIRECT_CHAT", "simple arithmetic")
+        print("[Orchestrator] Math short-circuit → DIRECT_CHAT")
     else:
         decision = route(req.text, emotion, recent_turns=_recent_turns)
     print(f"[Orchestrator] Route → {decision.action} | {decision.reason}")

@@ -10,7 +10,7 @@ import json
 import sys
 import requests
 
-ORCHESTRATOR = "http://localhost:8001"
+ORCHESTRATOR = "http://localhost:8003"
 MEMORY_AGENT  = "http://localhost:8000"
 ELARA         = "http://localhost:8002"
 

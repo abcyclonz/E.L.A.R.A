@@ -116,8 +116,38 @@ def process(req: ProcessRequest):
     with get_db() as db:
         log_raw(db, req.speaker, req.text, req.emotion, req.scene, req.metadata or {})
 
-        extraction = extract_claims(req.text, req.emotion, req.scene)
         speaker_id = req.speaker or "user"
+
+        # Pre-fetch existing snapshot so the extractor can deduplicate and resolve pronouns
+        existing_snapshot_obj = assemble_snapshot(
+            db, "GENERAL", question=req.text,
+            speaker_id=speaker_id, llm_rerank=False,
+        )
+        existing_snapshot = existing_snapshot_obj.model_dump() if existing_snapshot_obj else {}
+
+        # Resolve speaker name from confirmed memory only — never from the session ID.
+        # Using the session ID (e.g. "Abhi") as speaker_name causes the LLM to treat
+        # "my name is abhi" as a duplicate and extract 0 claims on first turn.
+        # Instead: default to "user", look up the VALUE of any stored name attribute.
+        speaker_name = "user"
+        for s in existing_snapshot.get("active_states", []):
+            if s.get("attribute") == "name" and s.get("value", "").lower() not in (
+                "unknown", "none", "", "user", "self"
+            ):
+                speaker_name = s["value"]  # e.g. "Abhi" from user.name=Abhi
+                break
+
+        recent_turns = [
+            {"speaker": t.get("speaker", "user"), "text": t.get("text", "")}
+            for t in existing_snapshot.get("last_5_turns", [])
+        ]
+
+        extraction = extract_claims(
+            req.text, req.emotion, req.scene,
+            speaker_name=speaker_name,
+            existing_snapshot=existing_snapshot,
+            recent_turns=recent_turns,
+        )
 
         for claim in extraction.claims:
             if claim.type == ClaimType.STATE:

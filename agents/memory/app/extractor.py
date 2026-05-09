@@ -11,39 +11,56 @@ _GARBAGE_VALUE = re.compile(
     re.IGNORECASE,
 )
 
-EXTRACTION_PROMPT = """You are a memory extraction engine. Extract structured memory claims from the user's message.
+EXTRACTION_PROMPT = """You are a memory extraction engine for an elderly care AI companion.
 
-Classify each claim as:
-- STATE: mutable fact that can change (age, relationship, job, location, mood)
-- BELIEF: subjective opinion or feeling ("I think", "I feel", "I hate", "I trust")
-- EVENT: something discrete that happened (fight, meeting, achievement)
-- IGNORE: small talk, greetings, filler
+SPEAKER NAME (confirmed from memory, or "user" if not yet known): {speaker_name}
+IMPORTANT: This name comes from stored memory, NOT from the session identifier. If the speaker
+says their name in the current message and it is NOT in EXISTING MEMORY, you MUST extract it —
+even if {speaker_name} already looks like a name. The session ID is not the same as stored memory.
 
-For each claim also provide:
-- "importance": float 0.0-1.0 — how important is this for long-term understanding of this person?
+EXISTING MEMORY (already stored — do not re-extract these):
+{existing_memory}
+
+RECENT CONVERSATION (for pronoun resolution and context):
+{recent_context}
+
+CURRENT MESSAGE: {text}
+Emotion: {emotion}
+
+Extract only NEW personal facts not already in memory. Classify each as:
+- STATE: mutable personal fact (name, location, relationship, job, hobby, preference)
+- BELIEF: subjective opinion ("I think", "I feel", "I hate", "I trust")
+- EVENT: something that happened (meeting, fight, achievement)
+- IGNORE: anything else
+
+STRICT RULES:
+1. Entity naming: Facts about the speaker → entity = "{speaker_name}". Facts about others → use their name.
+2. No world knowledge: Never extract general facts (capitals, history, science, sports scores, news). Only personal facts about the user and people they know.
+3. No transient states: Do NOT store current emotions, moods, or temporary physical states
+   (tired, sad, happy, lonely, frustrated, anxious, sleepy, hungry, bored, excited, angry, etc.).
+   These are momentary and not worth persisting. Only store PERMANENT or LONG-TERM personal facts.
+4. No duplicates: If the fact is already in EXISTING MEMORY above, mark as IGNORE.
+   EXCEPTION: if EXISTING MEMORY has no name entry for the speaker, ALWAYS extract a stated name.
+5. Pronoun resolution: Use RECENT CONVERSATION to resolve "him", "her", "they" to actual names. Never use a pronoun as entity.
+6. Minimal extraction: Only extract what is clearly stated. Do not infer or speculate.
+
+Importance scale:
   0.9+ = fundamental (name, serious illness, key relationships, bereavement)
   0.6  = notable (job, hobby, address, significant preference)
-  0.3  = minor (passing mood, today's plan, casual remark)
-  0.1  = trivial (filler, pleasantry that contains no real info)
-- "stability": one of "permanent" | "stable" | "transient"
-  permanent = essentially never changes (name, birthplace, deceased relatives)
-  stable    = changes rarely, perhaps annually (job, home, long-term relationships)
-  transient = expected to change within days or weeks (today's mood, immediate plans, recent events)
+  0.3  = minor (today's plan, casual remark)
+  0.1  = trivial
 
-CRITICAL RULES:
-1. Pronoun resolution: Never use "he", "she", "they", "it" as entity. Always resolve to the actual person/role.
-2. Correction detection: If user corrects a previous statement (uses "actually", "I meant", "not X it's Y"), extract corrected fact and add "corrects_entity" with the old wrong entity name.
+Stability:
+  permanent = never changes (name, birthplace, deceased relatives)
+  stable    = changes rarely (job, home, long-term relationships)
+  transient = changes within days/weeks (plans, current activities)
 
 Return ONLY a JSON object:
-{{"claims": [{{"type": "STATE", "entity": "neighbour", "attribute": "relationship", "value": "hate", "confidence": 0.95, "importance": 0.6, "stability": "stable", "topic": "neighbour"}}]}}
+{{"claims": [{{"type": "STATE", "entity": "{speaker_name}", "attribute": "location", "value": "Kerala", "confidence": 0.95, "importance": 0.6, "stability": "stable", "topic": "location"}}]}}
 
-For BELIEF: add "observer": "user", "entity_or_event": "<subject>"
+For BELIEF: add "observer": "{speaker_name}", "entity_or_event": "<subject>"
 For EVENT:  add "entity_or_event": "<event_name>"
 For corrections: add "corrects_entity": "<old wrong entity>"
-
-Message: {text}
-Emotion: {emotion}
-Scene: {scene}
 
 JSON:"""
 
@@ -114,10 +131,42 @@ def _call_ollama(prompt: str, max_tokens: int = 500) -> str:
     return response.json()["response"]
 
 
-def extract_claims(text: str, emotion: str = None, scene: str = None) -> ExtractionResult:
+def _summarise_existing_memory(snapshot: dict | None) -> str:
+    if not snapshot:
+        return "None"
+    lines = []
+    for s in snapshot.get("active_states", []):
+        lines.append(f"  {s['entity']}.{s['attribute']} = {s['value']}")
+    for b in snapshot.get("relevant_beliefs", []):
+        lines.append(f"  belief: {b.get('entity_or_event','?')} — {b.get('value','?')}")
+    return "\n".join(lines) if lines else "None"
+
+
+def _summarise_recent_context(recent_turns: list | None) -> str:
+    if not recent_turns:
+        return "None"
+    lines = []
+    for t in recent_turns[-6:]:
+        role = t.get("speaker", t.get("role", "user"))
+        lines.append(f"  {role}: {t.get('text', t.get('content', ''))}")
+    return "\n".join(lines)
+
+
+def extract_claims(
+    text: str,
+    emotion: str = None,
+    scene: str = None,
+    speaker_name: str = "user",
+    existing_snapshot: dict | None = None,
+    recent_turns: list | None = None,
+) -> ExtractionResult:
     try:
         prompt = EXTRACTION_PROMPT.format(
-            text=text, emotion=emotion or "unknown", scene=scene or "unknown"
+            text=text,
+            emotion=emotion or "none",
+            speaker_name=speaker_name,
+            existing_memory=_summarise_existing_memory(existing_snapshot),
+            recent_context=_summarise_recent_context(recent_turns),
         )
         raw  = _call_ollama(prompt)
         print(f"[Extractor] Raw: {raw[:300]}")

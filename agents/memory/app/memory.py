@@ -525,10 +525,12 @@ def assemble_snapshot(
     Salience filtering is always applied.
     LLM reranking is applied when llm_rerank=True (retrieval queries).
     """
-    focused_entities = _entities_from_question(question)
-    active_states    = get_active_states(
+    # Entity filtering removed: facts are stored under proper names (Arjun, Abhi),
+    # not relationship terms (son, wife), so keyword-based entity filtering always
+    # returns empty results. Salience scoring handles relevance ranking instead.
+    active_states = get_active_states(
         db,
-        entities=focused_entities if focused_entities else None,
+        entities=None,
         speaker_id=speaker_id,
     )
 

@@ -140,7 +140,10 @@ USE_TOOL — use for ALL of these:
            "I'm going to look up X" → user's own plan → STORE_MEMORY
       Key rule: only USE_TOOL when the user is directing ELARA to search, not when they describe
       their own future action.
-  (c) Reminders and calendar requests
+  (c) Reminders and calendar requests — ANY request to schedule, add, set, or create an event/meeting/reminder.
+      YES: "schedule a meeting on May 10", "can you schedule a meeting tomorrow evening",
+           "add an appointment on Monday", "set a reminder for 8pm", "remind me to take medicine",
+           "book a slot on Friday", "add this to my calendar", "can you set a reminder"
   (d) Corrections or clarifications to a PREVIOUS search/tool request — check Recent conversation.
       If the prior turn used a tool (web_search, calendar, reminder) and the user is now
       correcting or refining that request, re-route to USE_TOOL with the SAME tool.
@@ -165,13 +168,18 @@ USE_TOOL — use for ALL of these:
 {_TOOLS_LIST}
   YES: "what are the districts of Kerala?", "search it", "search Kerala",
        "remind me to take medicine at 8pm", "what's the weather today",
-       "how many states does India have", "who is the prime minister", "look that up"
+       "how many states does India have", "who is the prime minister", "look that up",
+       "who won the last cricket world cup?", "who won the last IPL?",
+       "what are the latest cricket results?", "who is the current president?",
+       "what happened in the news today?", "what is today's temperature?"
   Format: USE_TOOL | tool_name | reason
 
-DIRECT_CHAT — greetings, small talk, questions TO ELARA, reactions, or simple replies that need nothing else.
+DIRECT_CHAT — greetings, small talk, questions TO ELARA, reactions, simple math, or simple replies that need nothing else.
   YES: "hey", "how are you", "tell me a joke", "ok", "thanks", "what's your name", "that's nice",
        "how have you been", "how are you doing", "what have you been up to", "how's your day",
-       "are you okay", "what do you think", "do you like X", "tell me about yourself"
+       "are you okay", "what do you think", "do you like X", "tell me about yourself",
+       "what is 2+2?", "what's 10% of 100?", "how many days in a week?", "what is 5 times 3?"
+  Simple arithmetic and basic math are ALWAYS DIRECT_CHAT — never USE_TOOL.
 
   ALSO DIRECT_CHAT — complaints about ELARA's behaviour (not a personal fact, just feedback):
     "I already told you this", "you never remember anything I say", "you're not listening to me",
