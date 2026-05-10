@@ -40,6 +40,68 @@ const TRANSCRIPT = [
   { who: 'robot', text: "Great! Neck stretches next?" },
 ]
 
+// ── Pi Camera Feed ─────────────────────────────────────────────────────────
+function PiCameraFeed({ sleeping }: { sleeping: boolean }) {
+  const [frame, setFrame] = useState<string | null>(null)
+  const [identity, setIdentity] = useState<string | null>(null)
+  const [offline, setOffline] = useState(false)
+
+  useEffect(() => {
+    if (sleeping) return
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await fetch('/api/pi/frames-event', { cache: 'no-store' })
+        if (!r.ok) { if (alive) setOffline(true); return }
+        const data = await r.json()
+        if (!alive) return
+        if (data.frame?.base64) {
+          setFrame(`data:image/jpeg;base64,${data.frame.base64}`)
+          setOffline(false)
+        }
+        setIdentity(data.identified_name || data.person || null)
+      } catch { if (alive) setOffline(true) }
+    }
+    poll()
+    const t = setInterval(poll, 1500)
+    return () => { alive = false; clearInterval(t) }
+  }, [sleeping])
+
+  if (sleeping) return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'oklch(0.40 0.04 145)' }}>
+      <IcMoon size={36} /><span style={{ fontSize: 13, fontWeight: 500 }}>Robot sleeping</span>
+    </div>
+  )
+
+  if (offline || !frame) return (
+    <>
+      <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0 }}>
+        <defs><pattern id="camGrid" width="32" height="32" patternUnits="userSpaceOnUse"><rect width="32" height="32" fill="oklch(0.10 0.01 145)" /><rect width="16" height="32" fill="oklch(0.13 0.01 145)" /></pattern></defs>
+        <rect width="100%" height="100%" fill="url(#camGrid)" />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'oklch(0.28 0.03 145)' }}>
+        <IcCamera size={32} />
+        <span style={{ fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>{offline ? 'pi camera offline' : 'connecting…'}</span>
+      </div>
+    </>
+  )
+
+  return (
+    <>
+      <img src={frame} alt="Pi camera" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+      {identity && identity !== 'Unknown' && (
+        <div style={{ position: 'absolute', bottom: 10, left: 10, padding: '3px 10px', borderRadius: 99, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', color: 'white', fontSize: 11, fontWeight: 600 }}>
+          {identity}
+        </div>
+      )}
+      <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 99, background: 'rgba(0,0,0,0.55)' }}>
+        <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', animation: 'elaraPulse 1.5s ease infinite' }} />
+        <span style={{ fontSize: 9, fontWeight: 700, color: 'white', letterSpacing: '0.06em' }}>LIVE</span>
+      </div>
+    </>
+  )
+}
+
 // ── Ping-pong Watch Video ──────────────────────────────────────────────────
 function WatchVideo({ data }: { data: WatchData }) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -234,28 +296,7 @@ function HardwareMode({ userName }: { userName: string }) {
         </div>
         {view === 'watch' ? <WatchVideo data={watchData} /> : (
           <div style={{ position: 'relative', aspectRatio: '4/3', background: 'oklch(0.12 0.01 145)', overflow: 'hidden' }}>
-            {sleeping ? (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'oklch(0.40 0.04 145)' }}>
-                <IcMoon size={36} /><span style={{ fontSize: 13, fontWeight: 500 }}>Robot sleeping</span>
-              </div>
-            ) : (
-              <>
-                <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0 }}>
-                  <defs><pattern id="camGrid" width="32" height="32" patternUnits="userSpaceOnUse"><rect width="32" height="32" fill="oklch(0.10 0.01 145)" /><rect width="16" height="32" fill="oklch(0.13 0.01 145)" /></pattern></defs>
-                  <rect width="100%" height="100%" fill="url(#camGrid)" />
-                </svg>
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'oklch(0.28 0.03 145)' }}>
-                  <IcCamera size={32} /><span style={{ fontSize: 11, fontWeight: 500, fontFamily: 'monospace' }}>oak-d camera feed</span>
-                </div>
-                {[0, 1, 2, 3].map(i => (
-                  <div key={i} style={{ position: 'absolute', top: i < 2 ? 14 : 'auto', bottom: i >= 2 ? 14 : 'auto', left: i % 2 === 0 ? 14 : 'auto', right: i % 2 !== 0 ? 14 : 'auto', width: 18, height: 18, borderTop: i < 2 ? '2px solid oklch(0.35 0.10 145)' : 'none', borderBottom: i >= 2 ? '2px solid oklch(0.35 0.10 145)' : 'none', borderLeft: i % 2 === 0 ? '2px solid oklch(0.35 0.10 145)' : 'none', borderRight: i % 2 !== 0 ? '2px solid oklch(0.35 0.10 145)' : 'none', opacity: 0.6 }} />
-                ))}
-                <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 99, background: 'rgba(0,0,0,0.55)' }}>
-                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444', animation: 'elaraPulse 1.5s ease infinite' }} />
-                  <span style={{ fontSize: 9, fontWeight: 700, color: 'white', letterSpacing: '0.06em' }}>REC</span>
-                </div>
-              </>
-            )}
+            <PiCameraFeed sleeping={sleeping} />
           </div>
         )}
       </div>

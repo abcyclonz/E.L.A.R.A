@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/components/auth-context"
 import { toast } from "sonner"
@@ -193,19 +193,68 @@ function Step1Form({ onNext }: { onNext: (data: Record<string, string>) => void 
 // ── Step 2 Face Scan ───────────────────────────────────────────────────────
 function Step2Face({ signupData, onDone }: { signupData: Record<string, string>; onDone: () => void }) {
   const { signup } = useAuth()
+  const [piMode, setPiMode] = useState<boolean | null>(null)
   const [captured, setCaptured] = useState<number[]>([])
+  const [frames, setFrames] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const streamRef = useRef<MediaStream | null>(null)
   const nextAngle = ANGLES.findIndex((_, i) => !captured.includes(i))
   const done = captured.length === ANGLES.length
+  const name = `${signupData.firstName} ${signupData.lastName}`.trim()
+
+  useEffect(() => {
+    fetch('/api/pi/config')
+      .then(r => r.json())
+      .then(d => setPiMode(!!d.is_pi))
+      .catch(() => setPiMode(false))
+  }, [])
+
+  useEffect(() => {
+    if (piMode !== false) return
+    navigator.mediaDevices
+      .getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false })
+      .then(s => { streamRef.current = s; if (videoRef.current) videoRef.current.srcObject = s })
+      .catch(() => toast.error('Camera unavailable'))
+    return () => { streamRef.current?.getTracks().forEach(t => t.stop()) }
+  }, [piMode])
+
+  const captureFrame = useCallback(async (): Promise<string> => {
+    if (piMode) {
+      const r = await fetch('/api/pi/frame', { cache: 'no-store' })
+      if (!r.ok) throw new Error('Pi camera unavailable')
+      const blob = await r.blob()
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader()
+        fr.onload = () => resolve(fr.result as string)
+        fr.onerror = reject
+        fr.readAsDataURL(blob)
+      })
+    }
+    const video = videoRef.current!
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 640
+    canvas.height = video.videoHeight || 480
+    const ctx = canvas.getContext('2d')!
+    ctx.save(); ctx.scale(-1, 1); ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height); ctx.restore()
+    return canvas.toDataURL('image/jpeg', 0.82)
+  }, [piMode])
 
   const handleCapture = async () => {
     if (done) {
       setLoading(true)
       try {
+        if (frames.length > 0) {
+          await fetch('/api/pi/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, images: frames }),
+          })
+        }
         await signup({
           email: signupData.email,
           password: signupData.password,
-          fullName: `${signupData.firstName} ${signupData.lastName}`.trim(),
+          fullName: name,
           age: '',
           preferredLanguage: signupData.language,
           background: '',
@@ -224,9 +273,15 @@ function Step2Face({ signupData, onDone }: { signupData: Record<string, string>;
       return
     }
     setLoading(true)
-    await new Promise(r => setTimeout(r, 900))
-    setCaptured(c => [...c, nextAngle])
-    setLoading(false)
+    try {
+      const frame = await captureFrame()
+      setFrames(f => [...f, frame])
+      setCaptured(c => [...c, nextAngle])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Capture failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -235,32 +290,33 @@ function Step2Face({ signupData, onDone }: { signupData: Record<string, string>;
         Position your face in the frame and capture each angle. Good lighting helps.
       </p>
       <div style={{ position: 'relative', aspectRatio: '4/3', background: 'oklch(0.12 0.01 145)', borderRadius: 12, overflow: 'hidden', border: '1.5px solid rgba(255,255,255,0.20)' }}>
-        <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0 }}>
-          <defs>
-            <pattern id="fdiag" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-              <rect width="24" height="24" fill="oklch(0.12 0.01 145)" />
-              <rect width="12" height="24" fill="oklch(0.15 0.01 145)" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#fdiag)" />
-        </svg>
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="oklch(0.45 0.03 145)" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
-            <circle cx="12" cy="13" r="4" />
-          </svg>
-          <span style={{ fontSize: 13, color: 'oklch(0.50 0.04 145)', fontWeight: 500 }}>
-            {done ? 'All angles captured ✓' : `Look: ${ANGLES[nextAngle]}`}
-          </span>
-        </div>
+        {piMode === null ? (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'oklch(0.45 0.03 145)' }}>
+            Detecting camera…
+          </div>
+        ) : piMode ? (
+          <img src="/api/pi/stream" alt="Pi camera" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : (
+          <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
+        )}
         <FaceReticle />
+        {piMode !== null && (
+          <div style={{ position: 'absolute', bottom: 8, right: 8, fontSize: 10, color: 'rgba(255,255,255,0.5)', background: 'rgba(0,0,0,0.45)', padding: '2px 7px', borderRadius: 4 }}>
+            {piMode ? 'pi cam' : 'webcam'}
+          </div>
+        )}
+        {!done && nextAngle >= 0 && piMode !== null && (
+          <div style={{ position: 'absolute', bottom: 12, left: 0, right: 0, textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'white', textShadow: '0 1px 6px rgba(0,0,0,0.8)' }}>
+            Look: {ANGLES[nextAngle]}
+          </div>
+        )}
       </div>
       <AngleChecklist captured={captured} />
       <div style={{ height: 2 }} />
-      <button className="e-btn-primary" onClick={handleCapture} disabled={loading} type="button">
+      <button className="e-btn-primary" onClick={handleCapture} disabled={loading || piMode === null} type="button">
         {loading
           ? <><Spinner /> {done ? 'Creating account…' : 'Capturing…'}</>
-          : done ? 'Complete Registration →' : `Capture Frame (${captured.length}/${ANGLES.length})`}
+          : done ? 'Complete Registration →' : `Capture (${captured.length}/${ANGLES.length}) — ${ANGLES[nextAngle] ?? ''}`}
       </button>
     </div>
   )
