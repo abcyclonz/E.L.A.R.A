@@ -212,6 +212,10 @@ BGPIDS+=($!)
 popd > /dev/null
 wait_url "http://localhost:8003/health" "orchestrator" 60
 
+# Seed test users (idempotent — skips users that already exist)
+log "Seeding test users..."
+ORCHESTRATOR_URL="http://localhost:8003" python3 "$ROOT/scripts/seed_test_users.py" || true
+
 # Perception Learner (passive; skips if no perception DB yet)
 log "Starting Perception Learner (port 8012)..."
 pushd "$ROOT/agents/perception_learner" > /dev/null

@@ -158,6 +158,18 @@ services:
       BACKEND_URL: http://orchestrator:8001
       PI_CAMERA_URL: ${PI_URL:-http://localhost:8765}
 
+  seed:
+    image: python:3.11-slim
+    container_name: seed_test_users
+    profiles: ["seed"]
+    volumes:
+      - ./scripts:/scripts
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8001
+    command: python /scripts/seed_test_users.py
+    depends_on:
+      - orchestrator
+
   perception_monitor:
     build:
       context: ./Face_login_Elara-master
