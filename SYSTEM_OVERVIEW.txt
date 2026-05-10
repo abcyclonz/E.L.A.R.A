@@ -9,6 +9,36 @@
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
+[2026-05-10]  Proactive health monitoring — watch data thresholds + alert system
+────────────────────────────────────────────────────────────────────────────────
+
+NEW — Watch Data Health Monitor  (agents/elara/health_monitor.py)
+  • Smartwatch readings (HR, temperature, battery) are now checked against
+    safe-range thresholds every time the frontend posts to /watchdata.
+  • Threshold rules (deterministic, no LLM):
+      HR > 110 BPM      → heart rate too high (tachycardia concern)
+      HR < 50 BPM       → heart rate too low  (bradycardia concern)
+      Temp > 37.5°C     → possible fever
+      Temp < 35.0°C     → possible hypothermia
+      Battery < 15%     → watch needs charging (info-level, not health-critical)
+  • On breach: /watchdata returns alert=true + elara_message (warm, Elara-style
+    proactive question). Frontend reads the response and displays the message
+    in the chat UI without the user having to say anything.
+  • Per-issue, per-session 10-minute cooldown prevents repeat alerts for the
+    same problem. Each issue type (hr_high, hr_low, temp_high, temp_low,
+    battery_low) has its own independent cooldown timer — battery low can still
+    fire even if hr_high is in cooldown.
+  • Zero readings (hr=0, temp=0.0) are ignored — treated as sensor absent.
+  • Multiple issues in one poll are combined into a single message: health
+    alerts lead, info alerts (battery) trail, joined with "Also, ...".
+  • Normal readings return {"status": "received", "alert": false} unchanged.
+
+NEW — Watch Data API Route  (frontend/app/api/watchdata/route.ts)
+  • Frontend Next.js route proxies POST /watchdata to BACKEND_URL (Elara :8002).
+  • Accepts: session_id, hr, battery, steps, temp + auto-stamps timestamp.
+  • Added by team PR (merged 2026-05-10). Health monitor backend built on top.
+
+────────────────────────────────────────────────────────────────────────────────
 [2026-05-10]  Voice pipeline moved to cloud — Pi thin client, DB ownership fix, location fix
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -748,8 +778,40 @@ Two parallel channels feed a shared memory store:
 
 
 ────────────────────────────────────────────────────────────────────────────────
-5. TOOL SERVERS  (agents/tools/)
+5. WATCH DATA HEALTH MONITOR  (agents/elara/health_monitor.py)
 ────────────────────────────────────────────────────────────────────────────────
+
+  Endpoint: POST /watchdata on Elara (:8002)
+  Called by: frontend/app/api/watchdata/route.ts (Next.js proxy route)
+  Fields accepted: session_id, hr (BPM), battery (%), steps, temp (°C)
+
+  How it works:
+    1. Frontend simulation posts watch readings whenever they update.
+    2. health_monitor.check_watch_data() runs deterministic threshold checks.
+    3. Each issue is filtered through a per-session, per-issue 10-minute
+       cooldown so the user is only notified once per sustained problem.
+    4. If new issues remain after cooldown filter:
+         build_proactive_message() assembles a warm Elara-style message.
+         /watchdata returns: {alert: true, elara_message: "...", issues: [...]}
+    5. Frontend detects alert=true and displays elara_message in the chat UI
+       as a proactive message from Elara — no user action needed.
+    6. Normal readings return {alert: false} — no disruption to the user.
+
+  Thresholds:
+    hr_high     HR > 110 BPM     health  "heart rate seems quite high — X BPM"
+    hr_low      HR < 50 BPM      health  "heart rate looks a little low at X BPM"
+    temp_high   Temp > 37.5°C    health  "temperature is reading X°C, a bit warm"
+    temp_low    Temp < 35.0°C    health  "temperature is on the lower side — X°C"
+    battery_low Battery < 15%    info    "watch battery running low at X%"
+
+  Cooldown: 10 minutes per issue per session (ALERT_COOLDOWN in health_monitor.py)
+  Zero sensor values (hr=0, temp=0.0) are skipped — treated as sensor absent.
+
+
+────────────────────────────────────────────────────────────────────────────────
+6. TOOL SERVERS  (agents/tools/)
+────────────────────────────────────────────────────────────────────────────────
+
 
   Web Search (port 8010):
     Wraps Tavily API. Tool: search(query, max_results=5).
@@ -776,16 +838,18 @@ Two parallel channels feed a shared memory store:
 
 
 ────────────────────────────────────────────────────────────────────────────────
-6. FRONTEND  (frontend/)
+7. FRONTEND  (frontend/)
 ────────────────────────────────────────────────────────────────────────────────
 
   Next.js web UI served on port 3000.
   Connects to orchestrator /chat endpoint (auth-gated).
   OTP verification flow: verify-otp page + otpverify component (recently added).
+  Watch data route (app/api/watchdata/route.ts): proxies simulated health data
+    to Elara /watchdata; displays elara_message in chat UI on alert=true.
 
 
 ────────────────────────────────────────────────────────────────────────────────
-7. VISION PIPELINE  (Face_login_Elara-master/ + agents/perception_learner/)
+8. VISION PIPELINE  (Face_login_Elara-master/ + agents/perception_learner/)
 ────────────────────────────────────────────────────────────────────────────────
 
   7a. EYE SERVICE  (Raspberry Pi 5, port 8765)
@@ -886,6 +950,10 @@ Two parallel channels feed a shared memory store:
   IDENTITY_TOLERANCE         Face_login_Elara-master/config.py     0.50
   MONITOR_PERIOD_S           env var                               60s
   POLL_INTERVAL_S            env var                               600s (10 min)
+  HR_HIGH / HR_LOW           elara/health_monitor.py               110 / 50 BPM
+  TEMP_HIGH / TEMP_LOW       elara/health_monitor.py               37.5 / 35.0 °C
+  BATTERY_LOW                elara/health_monitor.py               15 %
+  ALERT_COOLDOWN             elara/health_monitor.py               10 min per issue
 
 
 ================================================================================
@@ -918,7 +986,8 @@ Two parallel channels feed a shared memory store:
   • Bandit cold start: first ~20 turns are exploration; no population warm-start
   • LLM quality ceiling: Mistral 7B occasionally hallucinates mild emotional
     context and gives unsolicited advice; Llama 3 70B via Groq would improve this
-  • Health monitor tool: registered but not connected to any sensor data source
+  • Health monitor tool: IMPLEMENTED — watch data thresholds active via
+    /watchdata endpoint on Elara; proactive alert returned to frontend on breach
   • Proactive check-ins (in-conversation): IMPLEMENTED via curiosity agent.
     Scheduled out-of-turn initiation ("Good morning", medication reminders)
     still not implemented — would require APScheduler + server-push to frontend
