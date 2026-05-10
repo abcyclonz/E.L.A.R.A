@@ -6,6 +6,23 @@ from enum import Enum
 
 # ── Inbound from Orchestrator ──────────────────────────────────────────────
 
+class SeedFact(BaseModel):
+    type:            str            # "state" or "belief"
+    entity:          Optional[str] = None
+    attribute:       Optional[str] = None
+    value:           Optional[str] = None
+    importance:      float          = 0.9
+    stability:       str            = "permanent"
+    confidence:      float          = 1.0
+    observer:        Optional[str] = None
+    entity_or_event: Optional[str] = None
+
+
+class SeedRequest(BaseModel):
+    speaker_id: str
+    facts:      List[SeedFact]
+
+
 class ProcessRequest(BaseModel):
     text: str
     speaker: str = "user"

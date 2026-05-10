@@ -6,6 +6,7 @@ from app.database import get_db, check_connection
 from app.models import (
     ProcessRequest, ProcessResponse, RetrieveRequest, MemorySnapshot,
     EpisodeRequest, RecallRequest, RecallResponse, Episode,
+    SeedRequest, ClaimType,
 )
 from app.extractor import extract_claims, classify_intent, embed_text
 from app.memory import (
@@ -14,7 +15,6 @@ from app.memory import (
     write_episode, get_similar_episodes,
     get_grounding_facts,
 )
-from app.models import ClaimType
 
 
 # ── DDL ────────────────────────────────────────────────────────────────────
@@ -250,6 +250,43 @@ def recall_episodes(req: RecallRequest):
         if r["similarity"] > 0.5
     ]
     return RecallResponse(episodes=episodes)
+
+
+# ── SEED ───────────────────────────────────────────────────────────────────
+
+@app.post("/seed", status_code=201)
+def seed_profile(req: SeedRequest):
+    """
+    Write structured profile facts directly, bypassing LLM extraction.
+    Called once at signup with exact importance/stability values so that
+    critical facts (name, language) are guaranteed grounding memories.
+
+    Grounding threshold: importance >= 0.85 AND stability == "permanent"
+    """
+    written = 0
+    with get_db() as db:
+        for fact in req.facts:
+            claim_type = ClaimType.STATE if fact.type == "state" else ClaimType.BELIEF
+            from app.models import ExtractedClaim
+            claim = ExtractedClaim(
+                type=claim_type,
+                entity=fact.entity,
+                attribute=fact.attribute,
+                value=fact.value,
+                confidence=fact.confidence,
+                importance=fact.importance,
+                stability=fact.stability,
+                observer=fact.observer or req.speaker_id,
+                entity_or_event=fact.entity_or_event,
+            )
+            if fact.type == "state":
+                write_state(db, claim, speaker_id=req.speaker_id)
+            else:
+                if not claim.entity_or_event:
+                    claim.entity_or_event = fact.entity or "user"
+                write_belief(db, claim, speaker_id=req.speaker_id)
+            written += 1
+    return {"status": "ok", "written": written}
 
 
 # ── GROUNDING ──────────────────────────────────────────────────────────────

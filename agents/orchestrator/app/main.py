@@ -95,37 +95,56 @@ class ChatRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _seed_profile_into_memory(user_id: str, req: "SignupRequest") -> None:
-    """Store the signup profile as memory facts so Elara knows who the user is."""
-    parts = []
-    if req.full_name:
-        parts.append(f"My name is {req.full_name}.")
-    if req.age:
-        parts.append(f"I am {req.age} years old.")
-    if req.preferred_language:
-        parts.append(f"I prefer to speak in {req.preferred_language}.")
-    if req.background:
-        parts.append(f"About my background: {req.background}.")
-    if req.interests:
-        parts.append(f"My interests include: {', '.join(req.interests)}.")
-    if req.technology_usage:
-        parts.append(f"My technology usage: {req.technology_usage}.")
-    if req.conversation_goals:
-        parts.append(f"My conversation goals: {', '.join(req.conversation_goals)}.")
-    if req.additional_info:
-        parts.append(req.additional_info)
+    """
+    Write signup profile directly to memory with predetermined importance values,
+    bypassing LLM extraction. This guarantees critical facts reach grounding status
+    (importance >= 0.85 + stability == permanent → always in Elara's context).
+    """
+    facts = []
 
-    if not parts:
+    # ── Grounding facts (always in context, never decay) ──────────────────
+    if req.full_name:
+        facts.append({"type": "state", "entity": "user", "attribute": "name",
+                      "value": req.full_name, "importance": 1.0, "stability": "permanent", "confidence": 1.0})
+    if req.preferred_language:
+        facts.append({"type": "state", "entity": "user", "attribute": "preferred_language",
+                      "value": req.preferred_language, "importance": 0.95, "stability": "permanent", "confidence": 1.0})
+    if req.age:
+        facts.append({"type": "state", "entity": "user", "attribute": "age",
+                      "value": str(req.age), "importance": 0.90, "stability": "permanent", "confidence": 1.0})
+    if req.background:
+        facts.append({"type": "state", "entity": "user", "attribute": "background",
+                      "value": req.background, "importance": 0.90, "stability": "permanent", "confidence": 1.0})
+
+    # ── High-importance stable facts ──────────────────────────────────────
+    if req.technology_usage:
+        facts.append({"type": "state", "entity": "user", "attribute": "technology_comfort",
+                      "value": req.technology_usage, "importance": 0.80, "stability": "stable", "confidence": 1.0})
+    if req.additional_info:
+        facts.append({"type": "state", "entity": "user", "attribute": "notes",
+                      "value": req.additional_info, "importance": 0.80, "stability": "stable", "confidence": 1.0})
+
+    # ── Preferences (beliefs — may evolve over time) ──────────────────────
+    for interest in (req.interests or []):
+        facts.append({"type": "belief", "entity_or_event": interest, "attribute": "interest",
+                      "value": "true", "importance": 0.80, "stability": "stable", "confidence": 0.95})
+    for pref in (req.conversation_preferences or []):
+        facts.append({"type": "belief", "entity_or_event": pref, "attribute": "conversation_preference",
+                      "value": "true", "importance": 0.80, "stability": "stable", "confidence": 0.95})
+    for goal in (req.conversation_goals or []):
+        facts.append({"type": "belief", "entity_or_event": goal, "attribute": "conversation_goal",
+                      "value": "true", "importance": 0.75, "stability": "stable", "confidence": 0.95})
+
+    if not facts:
         return
 
-    profile_text = " ".join(parts)
     try:
         _requests.post(
-            f"{settings.memory_agent_url}/process",
-            json={"text": profile_text, "speaker": user_id,
-                  "metadata": {"source": "signup_profile"}},
+            f"{settings.memory_agent_url}/seed",
+            json={"speaker_id": user_id, "facts": facts},
             timeout=30,
         )
-        print(f"[Auth] Seeded profile for {user_id}: {profile_text[:80]}...")
+        print(f"[Auth] Seeded {len(facts)} profile facts for {user_id} (grounding: name, language, age, background)")
     except Exception as e:
         print(f"[Auth] Profile seed failed (non-fatal): {e}")
 
