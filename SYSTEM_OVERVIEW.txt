@@ -9,6 +9,126 @@
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
+[2026-05-10]  Signup profile seeded as grounding memories + mock test users
+────────────────────────────────────────────────────────────────────────────────
+
+NEW — /seed endpoint on Memory Agent  (agents/memory/app/main.py + models.py)
+  • New POST /seed endpoint writes structured profile facts directly to PostgreSQL,
+    bypassing LLM extraction entirely — deterministic importance/stability values.
+  • Used at signup so name, language, age, background are GUARANTEED to be stored
+    with exact priority values, not subject to Ollama extraction variability.
+  • Importance/stability tiers applied at signup:
+      name                 → STATE, importance=1.00, stability=permanent  (GROUNDING)
+      preferred_language   → STATE, importance=0.95, stability=permanent  (GROUNDING)
+      age                  → STATE, importance=0.90, stability=permanent  (GROUNDING)
+      background           → STATE, importance=0.90, stability=permanent  (GROUNDING)
+      technology_usage     → STATE, importance=0.80, stability=stable
+      additional_info      → STATE, importance=0.80, stability=stable
+      interests            → BELIEF, importance=0.80, stability=stable
+      conversation_prefs   → BELIEF, importance=0.80, stability=stable
+      conversation_goals   → BELIEF, importance=0.75, stability=stable
+
+GROUNDING FACTS — NEVER DECAY
+  • Grounding threshold: importance ≥ 0.85 AND stability = permanent.
+  • get_grounding_facts() fetches via: WHERE is_grounding = TRUE AND valid_to IS NULL
+  • This query has NO salience scoring, NO age penalty, NO frequency weighting.
+  • Grounding facts (name, language, age, background) are IMMUNE to decay.
+    They appear in every Elara context window regardless of how long ago they were
+    stored or how many turns have passed since the user last mentioned them.
+  • Ordinary facts (events, interests, transient states) DO decay via salience
+    scoring: importance×0.40 + recency×0.40 + frequency×0.20, threshold 0.10,
+    with half-lives: permanent=3650d, stable=365d, transient=14d.
+    But grounding facts bypass this scorer entirely — the code path is different.
+
+NEW — Idempotent test user seeding  (scripts/seed_test_users.py)
+  • Two persistent mock users seeded automatically on every stack startup:
+      Margaret Thompson  maggie@elara.dev  /  test1234
+        74-year-old retired school teacher in Kochi; gardening, reading, crosswords
+      Robert Chen        bob@elara.dev     /  test1234
+        68-year-old retired electrical engineer in Trivandrum; chess, cricket, news
+  • Script uses only stdlib (urllib.request) — no external dependencies.
+  • Idempotent: 400 "already exists" → prints "– Exists" and continues. Safe to run
+    repeatedly. Users that fail print "✗ Failed" and script exits 1.
+  • Auto-called from start.sh after orchestrator passes health check:
+      ORCHESTRATOR_URL="http://localhost:8003" python3 scripts/seed_test_users.py || true
+  • Docker: docker compose --profile seed run --rm seed  (separate "seed" profile)
+  • Profile data for each mock user is sent through /auth/signup → orchestrator
+    → memory_agent /seed → stored as grounding + stable memories immediately.
+
+────────────────────────────────────────────────────────────────────────────────
+[2026-05-10]  Pi camera integration in frontend — API proxy routes + live feed
+────────────────────────────────────────────────────────────────────────────────
+
+NEW — Server-side Next.js proxy routes  (frontend/app/api/pi/)
+  • Five new API routes proxy Pi camera requests from browser → Next.js server → Pi.
+    Pi's local IP is unreachable from the browser; the Next.js server (on RunPod)
+    bridges the gap. PI_CAMERA_URL env var on the server holds the Pi address.
+      /api/pi/config        → GET  /config       (detects is_pi: true/false)
+      /api/pi/stream        → GET  /track/stream  (MJPEG multipart proxy, unbuffered)
+      /api/pi/frame         → GET  /frames/event  → extracts single JPEG frame
+      /api/pi/register      → POST /register      (30s timeout for face capture)
+      /api/pi/frames-event  → GET  /frames/event  (JSON: frame + identity + bbox)
+  • MJPEG streaming: Response(upstream.body) + X-Accel-Buffering: no header.
+
+CHANGED — Signup Step 2 face registration  (frontend/app/login/page.tsx)
+  • On mount: fetches /api/pi/config → detects Pi vs browser webcam automatically.
+  • Pi mode: shows live MJPEG stream via <img src="/api/pi/stream"> + "pi cam" badge.
+  • Browser mode: opens getUserMedia → <video> element + "webcam" badge.
+  • captureFrame(): Pi → fetches /api/pi/frame → reads arrayBuffer → base64 JPEG;
+                   Browser → canvas.drawImage(video) → toDataURL('image/jpeg', 0.82).
+  • Angle hint overlay shown in Pi mode (prompts user to face camera at eye level).
+  • On completion: POSTs frames to /api/pi/register (Pi) or processes locally (browser).
+
+NEW — Live Pi camera feed in dashboard  (frontend/components/senior-chat.tsx)
+  • PiCameraFeed component polls /api/pi/frames-event every 1500ms.
+  • Shows live base64 JPEG + identity badge + LIVE / CONNECTING / OFFLINE states.
+  • Replaces the static SVG placeholder in the HardwareMode camera tab.
+
+CHANGED — PI_CAMERA_URL wiring  (docker-compose.yml + start.sh)
+  • PI_CAMERA_URL is now derived from the existing PI_URL variable (already in root
+    .env for perception_monitor) — no separate variable needed.
+      docker-compose: PI_CAMERA_URL: ${PI_URL:-http://localhost:8765}
+      start.sh build: PI_CAMERA_URL="${PI_URL:-http://localhost:8765}" npm run build
+  • Default http://localhost:8765 means: frontend works offline without Pi connected.
+
+────────────────────────────────────────────────────────────────────────────────
+[2026-05-10]  Face_login_Elara upstream migration — servo protocol + ESP32 firmware
+────────────────────────────────────────────────────────────────────────────────
+
+MIGRATED — Upstream changes from sarangKP/Face_login_Elara (cloned to /Face_login_Elara)
+
+CHANGED — Servo protocol  (Face_login_Elara-master/servo.py)
+  • Protocol: P<pan> T<tilt>\n  →  F<pan:.1f}\n  (pan-only, face-position command)
+  • ESP32 now reports actual servo angle back: A<angle>\n at 200ms intervals.
+  • Added _serial_reader() daemon thread reading A<angle>\n from ESP32 serial.
+  • Added sync_pan_to_esp32(): syncs Python pan state to ESP32's actual position.
+  • Added send_face_x(face_cx, frame_w): sends F{pct}\n (percentage across frame).
+
+CHANGED — Tracker face re-acquisition  (Face_login_Elara-master/tracker.py)
+  • On face re-acquisition after no-face timeout: calls servo.sync_pan_to_esp32()
+    before PID reset — prevents servo jump from stale Python pan state.
+  • Removed servo.center() call on no-face timeout. Rationale: F90 command (center)
+    would be interpreted by ESP32 as a face command, blocking SOUND mode entirely.
+  • Recognition loop: minNeighbors 3→4, minSize (20,20)→(60,60) — reduces jitter.
+
+CHANGED — PID tuning  (Face_login_Elara-master/config.py)
+  • PID_KP: 0.012 → 0.008   (smoother response)
+  • PID_KD: 0.003 → 0.006   (more damping)
+  • PID_OUTPUT_LIMIT_PAN: 1.5 → 1.0
+  • PID_OUTPUT_LIMIT_TILT: 1.2 → 0.8
+  • SLEW_MAX_DEG: 2.0 → 1.0  (reduces servo jitter)
+
+NEW — ESP32 firmware with multi-modal awareness  (Face_login_Elara-master/may_10th/src/main.cpp)
+  • Three operating modes: FACE (F<angle> command), SOUND (INMP441 dual-mic DOA), IDLE.
+  • Sound override: if confirmed sound source >25° from face → hand off to SOUND mode.
+  • IMU jitter meter via MPU6050; reports GYRO gx=... rms=... at 20Hz for calibration.
+  • TFT ST7735 display with animated eyes (tracks face position visually).
+  • Reports A<angle>\n back to Pi at 200ms intervals for sync_pan_to_esp32().
+
+NEW — Servo test utility  (Face_login_Elara-master/servo_test.py)
+  • Curses TUI: manual pan/tilt control + live IMU jitter bar graph from ESP32.
+
+────────────────────────────────────────────────────────────────────────────────
 [2026-05-10]  Memory extraction overhaul — model upgrade, prompt rewrite, fixes
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -1051,16 +1171,32 @@ Two parallel channels feed a shared memory store:
   HOW TO RUN
 ================================================================================
 
-  Full stack:
+  Full stack (Docker):
     docker compose up --build
 
+  Full stack (native, no Docker — RunPod non-privileged pod):
+    ./start.sh
+    Starts: PostgreSQL, Redis, Ollama, Memory Agent, Orchestrator, Elara,
+            Web Search Tool, Assistant Tool, Perception Learner, Next.js frontend.
+    Auto-creates venvs, runs DB setup, seeds mock test users on every start.
+
+  Seed mock test users (manual — Docker):
+    docker compose --profile seed run --rm seed
+
   Test client (text input, shows router + affect + personality diagnostics):
-    python test_chat.py           # to orchestrator at :8001
+    python test_chat.py           # to orchestrator at :8001 (Docker) / :8003 (native)
     python test_chat.py --elara   # direct to Elara at :8002
 
   MIC module only:
     cd MIC && python main.py
 
+  Pi thin client (copy pi_client/ to Raspberry Pi, set ORCHESTRATOR_WS_URL in .env):
+    bash pi_client/run.sh
+
   Requires: .env file in project root with TAVILY_API_KEY at minimum.
+
+  TEST CREDENTIALS (auto-seeded on every startup):
+    Margaret Thompson   maggie@elara.dev   password: test1234
+    Robert Chen         bob@elara.dev      password: test1234
 
 ================================================================================

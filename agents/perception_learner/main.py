@@ -118,6 +118,34 @@ def _total_snapshot_count() -> int:
         return 0
 
 
+# ── Poll logic (shared by background loop and /debug/trigger) ─────────────────
+
+async def _run_one_poll() -> dict:
+    last_id   = _last_processed_id()
+    snapshots = _fetch_new_snapshots(since_id=last_id)
+
+    results = []
+    for snap in snapshots:
+        log.info("--- snapshot #%d  user=%-12s  emotion=%s",
+                 snap["id"], snap["user"], snap["emotion"])
+        try:
+            inference = await asyncio.to_thread(reasoner.process_snapshot, snap)
+        except Exception as e:
+            log.exception("reasoner crashed on snapshot #%d: %s", snap["id"], e)
+            inference = None
+
+        _mark_processed(snap["id"], inference)
+        results.append({
+            "snapshot_id": snap["id"],
+            "user":        snap["user"],
+            "emotion":     snap["emotion"],
+            "inference":   inference,
+            "stored":      inference is not None,
+        })
+
+    return {"processed": len(results), "results": results}
+
+
 # ── Poll loop ──────────────────────────────────────────────────────────────────
 
 async def _poll_loop():
@@ -126,32 +154,9 @@ async def _poll_loop():
 
     while True:
         try:
-            last_id   = _last_processed_id()
-            snapshots = _fetch_new_snapshots(since_id=last_id)
-
-            if snapshots:
-                log.info("%d new snapshot(s) to process (since id=%d)",
-                         len(snapshots), last_id)
-            else:
-                log.debug("no new snapshots since id=%d", last_id)
-
-            for snap in snapshots:
-                log.info("--- snapshot #%d  user=%-12s  emotion=%s",
-                         snap["id"], snap["user"], snap["emotion"])
-                try:
-                    inference = await asyncio.to_thread(
-                        reasoner.process_snapshot, snap
-                    )
-                except Exception as e:
-                    log.exception("reasoner crashed on snapshot #%d: %s",
-                                  snap["id"], e)
-                    inference = None
-
-                _mark_processed(snap["id"], inference)
-
+            await _run_one_poll()
         except Exception as e:
             log.exception("poll loop error: %s", e)
-
         await asyncio.sleep(POLL_INTERVAL_S)
 
 
@@ -201,3 +206,56 @@ def status():
         "pending_snapshots":          pending,
         "poll_interval_s":            POLL_INTERVAL_S,
     }
+
+
+# ── Debug endpoints (used by test suite) ──────────────────────────────────────
+
+@app.post("/debug/inject_snapshot")
+def inject_snapshot(snap: dict):
+    """
+    Write a fake perception snapshot directly into timeline.db.
+    Used by the test suite to simulate monitor.py output without needing a Pi.
+    """
+    PERCEPTION_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(PERCEPTION_DB_PATH)) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts         TEXT    NOT NULL,
+                user       TEXT    NOT NULL,
+                emotion    TEXT    NOT NULL,
+                confidence REAL    NOT NULL,
+                scene      TEXT    NOT NULL,
+                subjects   TEXT    NOT NULL,
+                affected   INTEGER NOT NULL,
+                reason     TEXT    NOT NULL,
+                summary    TEXT    NOT NULL,
+                thumbnail  BLOB
+            )
+        """)
+        cur = conn.execute(
+            "INSERT INTO snapshots (ts, user, emotion, confidence, scene, subjects, "
+            "affected, reason, summary) VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                snap.get("ts", "2024-01-01T00:00:00+00:00"),
+                snap["user"],
+                snap.get("emotion", "neutral"),
+                snap.get("confidence", 0.8),
+                snap.get("scene", ""),
+                json.dumps(snap.get("subjects", [])),
+                int(snap.get("emotion_affected", False)),
+                snap.get("reason", ""),
+                snap.get("summary", ""),
+            ),
+        )
+    return {"snapshot_id": cur.lastrowid}
+
+
+@app.post("/debug/trigger")
+async def trigger_poll():
+    """
+    Force one immediate poll cycle and return per-snapshot results.
+    Used by the test suite to avoid waiting 10 minutes.
+    """
+    result = await _run_one_poll()
+    return result
