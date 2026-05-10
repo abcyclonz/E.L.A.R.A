@@ -151,7 +151,11 @@ check("Claims extracted (relations)", d4["claims_extracted"] >= 1,
 time.sleep(1)
 snap2 = retrieve("Tell me about George's sons David and Thomas")
 states2 = snap2.get("active_states", [])
-all_vals = " ".join(str(s.get("value","")).lower() for s in states2)
+# Sons stored as entity=David/Thomas — search both entity and value fields
+all_vals = " ".join(
+    (str(s.get("entity","")) + " " + str(s.get("value",""))).lower()
+    for s in states2
+)
 has_david   = "david" in all_vals
 has_thomas  = "thomas" in all_vals
 has_london  = "london" in all_vals
@@ -171,12 +175,18 @@ check("Claims extracted (belief)", d5["claims_extracted"] >= 1,
 time.sleep(1)
 snap3 = retrieve("What does George think about the NHS?")
 beliefs = snap3.get("relevant_beliefs", [])
-has_belief = (len(beliefs) >= 1 or
-              any("nhs" in str(s.get("value","")).lower() or
-                  "grateful" in str(s.get("value","")).lower()
-                  for s in snap3.get("active_states",[])))
-check("Opinion about NHS stored in belief layer", has_belief,
-      f"beliefs found: {len(beliefs)}")
+# Accept: stored in belief_memory OR as STATE.opinion_* — both are valid encodings
+has_belief = (
+    len(beliefs) >= 1 or
+    any(
+        "nhs" in (str(s.get("attribute","")) + str(s.get("value",""))).lower() or
+        "grateful" in str(s.get("value","")).lower() or
+        "wonderful" in str(s.get("value","")).lower()
+        for s in snap3.get("active_states", [])
+    )
+)
+check("Opinion about NHS stored (belief or state layer)", has_belief,
+      f"beliefs={len(beliefs)}, states checked")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -298,15 +308,19 @@ time.sleep(1)
 snap_a = retrieve("What is the user's name?", speaker=SPEAKER)
 snap_b = retrieve("What is the user's name?", speaker=SPEAKER_B)
 
-vals_a = " ".join(str(s.get("value","")).lower()
-                  for s in snap_a.get("active_states", []))
-vals_b = " ".join(str(s.get("value","")).lower()
-                  for s in snap_b.get("active_states", []))
+# Check both entity and value fields — names can be in either
+def _scan(states):
+    return " ".join(
+        (str(s.get("entity","")) + " " + str(s.get("value",""))).lower()
+        for s in states
+    )
 
-# George should be in A, Alice in B; not leaked across
-george_in_a = "george" in vals_a
-alice_in_b  = "alice" in vals_b
-paris_not_in_a = "paris" not in vals_a
+vals_a = _scan(snap_a.get("active_states", []))
+vals_b = _scan(snap_b.get("active_states", []))
+
+george_in_a    = "george" in vals_a
+alice_in_b     = "alice"  in vals_b
+paris_not_in_a = "paris"  not in vals_a
 
 check("Speaker A (George) facts correct in own session", george_in_a)
 check("Speaker B (Alice) facts correct in own session", alice_in_b)

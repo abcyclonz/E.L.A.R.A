@@ -13,70 +13,117 @@ _GARBAGE_VALUE = re.compile(
 
 EXTRACTION_PROMPT = """You are a memory extraction engine for an elderly care AI companion.
 
-SPEAKER NAME (confirmed from memory, or "user" if not yet known): {speaker_name}
-IMPORTANT: This name comes from stored memory, NOT from the session identifier. If the speaker
-says their name in the current message and it is NOT in EXISTING MEMORY, you MUST extract it —
-even if {speaker_name} already looks like a name. The session ID is not the same as stored memory.
+━━━ CONTEXT ━━━
+SPEAKER NAME (from stored memory, "user" if unknown): {speaker_name}
+NOTE: If the speaker states their name and it is NOT in EXISTING MEMORY, extract it — the session
+ID is not the same as a confirmed stored name.
 
-EXISTING MEMORY (already stored — do not re-extract these):
+EXISTING MEMORY (skip re-extracting anything already here):
 {existing_memory}
 
-RECENT CONVERSATION (for pronoun resolution and context):
+RECENT CONVERSATION (use to resolve pronouns like "he/she/they" to real names):
 {recent_context}
 
 CURRENT MESSAGE: {text}
 Emotion: {emotion}
 
-Extract only NEW personal facts not already in memory. Classify each as:
-- STATE: mutable personal fact (name, location, relationship, job, hobby, preference)
-- BELIEF: subjective opinion ("I think", "I feel", "I hate", "I trust")
-- EVENT: something that happened (meeting, fight, achievement)
-- IGNORE: anything else
+━━━ YOUR TASK ━━━
+Extract ALL new personal facts from the message. A message may contain MULTIPLE facts —
+return one claim object per fact. Skip anything already in EXISTING MEMORY.
 
-STRICT RULES:
-1. Entity naming: Facts about the speaker → entity = "{speaker_name}". Facts about others → use their name.
-2. No world knowledge: Never extract general facts (capitals, history, science, sports scores, news). Only personal facts about the user and people they know.
-3. No transient states: Do NOT store current emotions, moods, or temporary physical states
-   (tired, sad, happy, lonely, frustrated, anxious, sleepy, hungry, bored, excited, angry, etc.).
-   These are momentary and not worth persisting. Only store PERMANENT or LONG-TERM personal facts.
-4. No duplicates: If the fact is already in EXISTING MEMORY above, mark as IGNORE.
-   EXCEPTION: if EXISTING MEMORY has no name entry for the speaker, ALWAYS extract a stated name.
-5. Pronoun resolution: Use RECENT CONVERSATION to resolve "him", "her", "they" to actual names. Never use a pronoun as entity.
-6. Minimal extraction: Only extract what is clearly stated. Do not infer or speculate.
+Claim types:
+  STATE  — a personal fact about a person (name, location, job, health, relationship, hobby, preference)
+  BELIEF — use this ONLY when the speaker expresses a direct subjective opinion using words like
+           "I think", "I feel", "I believe", "I love", "I hate", "I trust", "in my opinion".
+           Fields required: observer, entity_or_event (the subject of the opinion), attribute, value.
+  EVENT  — something that happened (a visit, meeting, achievement, incident)
+  IGNORE — world knowledge, duplicate, or transient emotion (tired, happy, sad, frustrated)
 
-Importance scale:
-  0.9+ = fundamental (name, serious illness, key relationships, bereavement)
-  0.6  = notable (job, hobby, address, significant preference)
-  0.3  = minor (today's plan, casual remark)
-  0.1  = trivial
+━━━ IMPORTANCE & STABILITY ━━━
+importance 0.95, stability "permanent"  → name, bereavement, serious illness, birthplace
+importance 0.85, stability "permanent"  → key relationship (spouse, child) with identity details
+importance 0.70, stability "stable"     → job, home address, long-term health condition
+importance 0.60, stability "stable"     → hobby, regular activity, significant preference
+importance 0.30, stability "transient"  → today's plan, recent activity
+importance 0.10, stability "transient"  → trivial remark
 
-Stability:
-  permanent = never changes (name, birthplace, deceased relatives)
-  stable    = changes rarely (job, home, long-term relationships)
-  transient = changes within days/weeks (plans, current activities)
+━━━ RULES ━━━
+1. Entity: facts about the speaker → entity = "{speaker_name}". Facts about another person → entity = their name.
+2. Multiple facts in one message → return multiple claim objects in the "claims" array.
+3. Pronoun resolution: resolve "he/she/they/him/her" using RECENT CONVERSATION. Never store a pronoun as entity.
+4. No world knowledge (news, history, science, sports scores). Only personal facts.
+5. No transient emotions/moods (tired, sad, lonely, anxious). Only permanent or long-term facts.
+6. Corrections: if user corrects a stored fact, set "corrects_entity" to the old wrong entity name.
 
-Return ONLY a JSON object:
-{{"claims": [{{"type": "STATE", "entity": "{speaker_name}", "attribute": "location", "value": "<extracted_value_here>", "confidence": 0.95, "importance": 0.6, "stability": "stable", "topic": "location"}}]}}
+━━━ JSON SCHEMA ━━━
+STATE  fields: type, entity, attribute, value, confidence, importance, stability, topic
+BELIEF fields: type, observer ("{speaker_name}"), entity_or_event, attribute, value, confidence, importance, stability
+EVENT  fields: type, entity_or_event, attribute ("event_description"), value, confidence, importance, stability
 
-For BELIEF: add "observer": "{speaker_name}", "entity_or_event": "<subject>"
-For EVENT:  add "entity_or_event": "<event_name>"
-For corrections: add "corrects_entity": "<old wrong entity>"
+━━━ FEW-SHOT EXAMPLES ━━━
+
+Example A — "My name is Robert and I was born in Dublin."
+{{"claims": [
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "name", "value": "Robert", "confidence": 0.99, "importance": 0.95, "stability": "permanent", "topic": "identity"}},
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "birthplace", "value": "Dublin", "confidence": 0.95, "importance": 0.95, "stability": "permanent", "topic": "identity"}}
+]}}
+
+Example B — "My wife Sarah passed away two years ago. I miss her every day."
+{{"claims": [
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "spouse_name", "value": "Sarah", "confidence": 0.99, "importance": 0.95, "stability": "permanent", "topic": "family"}},
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "spouse_status", "value": "deceased", "confidence": 0.99, "importance": 0.95, "stability": "permanent", "topic": "bereavement"}}
+]}}
+
+Example C — "I have two sons — Michael lives in London and Peter is in Edinburgh."
+{{"claims": [
+  {{"type": "STATE", "entity": "Michael", "attribute": "relation_to_{speaker_name}", "value": "son", "confidence": 0.99, "importance": 0.85, "stability": "permanent", "topic": "family"}},
+  {{"type": "STATE", "entity": "Michael", "attribute": "location", "value": "London", "confidence": 0.95, "importance": 0.60, "stability": "stable", "topic": "family"}},
+  {{"type": "STATE", "entity": "Peter", "attribute": "relation_to_{speaker_name}", "value": "son", "confidence": 0.99, "importance": 0.85, "stability": "permanent", "topic": "family"}},
+  {{"type": "STATE", "entity": "Peter", "attribute": "location", "value": "Edinburgh", "confidence": 0.95, "importance": 0.60, "stability": "stable", "topic": "family"}}
+]}}
+
+Example D — "I think the local council is doing a poor job. I love gardening though."
+{{"claims": [
+  {{"type": "BELIEF", "observer": "{speaker_name}", "entity_or_event": "local council", "attribute": "opinion", "value": "doing a poor job", "confidence": 0.90, "importance": 0.30, "stability": "transient"}},
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "hobby", "value": "gardening", "confidence": 0.95, "importance": 0.60, "stability": "stable", "topic": "hobby"}}
+]}}
+
+Example E — "I visited my daughter Emma in Bristol last weekend. We went to a museum."
+{{"claims": [
+  {{"type": "STATE", "entity": "Emma", "attribute": "relation_to_{speaker_name}", "value": "daughter", "confidence": 0.99, "importance": 0.85, "stability": "permanent", "topic": "family"}},
+  {{"type": "STATE", "entity": "Emma", "attribute": "location", "value": "Bristol", "confidence": 0.90, "importance": 0.60, "stability": "stable", "topic": "family"}},
+  {{"type": "EVENT", "entity_or_event": "visit_to_Emma", "attribute": "event_description", "value": "visited daughter Emma in Bristol, went to a museum", "confidence": 0.95, "importance": 0.30, "stability": "transient"}}
+]}}
+
+Example F — "My doctor is Dr. Ahmed. He says I need to watch my blood pressure."
+{{"claims": [
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "doctor", "value": "Dr. Ahmed", "confidence": 0.95, "importance": 0.70, "stability": "stable", "topic": "health"}},
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "health_condition", "value": "high blood pressure (monitoring required)", "confidence": 0.90, "importance": 0.85, "stability": "stable", "topic": "health"}}
+]}}
+
+Example G (correction) — "Actually I moved to Manchester, not Sheffield."
+EXISTING MEMORY has: user.location = Sheffield
+{{"claims": [
+  {{"type": "STATE", "entity": "{speaker_name}", "attribute": "location", "value": "Manchester", "confidence": 0.99, "importance": 0.60, "stability": "stable", "topic": "location", "corrects_entity": "user"}}
+]}}
+
+━━━ NOW EXTRACT FROM THE CURRENT MESSAGE ━━━
+Return ONLY a JSON object with a "claims" array. No explanation, no markdown fences.
 
 JSON:"""
 
-INTENT_PROMPT = """Classify the retrieval intent. Return ONE word only.
+INTENT_PROMPT = """Classify the retrieval intent. Return ONE word only — no explanation.
 
-Options: CURRENT_STATE, PAST_BELIEF, EVENT, HISTORY, GENERAL
-
-CURRENT_STATE = asking about current status
-PAST_BELIEF   = asking about past feelings/opinions
-EVENT         = asking what happened
-HISTORY       = asking how something changed over time
-GENERAL       = everything else
+Options:
+  CURRENT_STATE = asking about someone's current status, attributes, or facts ("where does X live?", "what is X's job?")
+  PAST_BELIEF   = asking about feelings, opinions, or what someone thinks/thought ("what does X think about Y?")
+  EVENT         = asking what happened, what someone did, or about a specific incident ("what did X do last week?")
+  HISTORY       = broad request for everything known, all memories, or the full profile ("tell me everything", "what do you know about X?", "give me all memories")
+  GENERAL       = anything else
 
 Question: {question}
 
-Answer:"""
+Answer (ONE word):"""
 
 RELEVANCE_PROMPT = """You are a memory relevance judge for an elderly care AI.
 
@@ -125,7 +172,7 @@ def _call_ollama(prompt: str, max_tokens: int = 500) -> str:
             "stream": False,
             "options": {"temperature": 0.1, "top_p": 0.9, "num_predict": max_tokens},
         },
-        timeout=30,
+        timeout=90,
     )
     response.raise_for_status()
     return response.json()["response"]
@@ -168,7 +215,7 @@ def extract_claims(
             existing_memory=_summarise_existing_memory(existing_snapshot),
             recent_context=_summarise_recent_context(recent_turns),
         )
-        raw  = _call_ollama(prompt)
+        raw  = _call_ollama(prompt, max_tokens=1200)
         print(f"[Extractor] Raw: {raw[:300]}")
         data = _parse_json(raw)
 

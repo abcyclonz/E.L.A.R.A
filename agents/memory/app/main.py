@@ -164,6 +164,9 @@ def process(req: ProcessRequest):
                     write_state(db, claim, emotion=req.emotion, speaker_id=speaker_id)
 
             elif claim.type == ClaimType.BELIEF:
+                # Fallback: LLM sometimes puts the subject in entity instead of entity_or_event
+                if not claim.entity_or_event and claim.entity:
+                    claim.entity_or_event = claim.entity
                 if claim.entity_or_event and claim.attribute and claim.value:
                     write_belief(db, claim, speaker_id=speaker_id)
 
