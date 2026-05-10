@@ -9,6 +9,52 @@
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
+[2026-05-10]  Memory extraction overhaul — model upgrade, prompt rewrite, fixes
+────────────────────────────────────────────────────────────────────────────────
+
+UPGRADE — Extraction model  (agents/memory/app/extractor.py)
+  • Local dev model bumped qwen2.5:3b → qwen2.5:7b via OLLAMA_MODEL env var.
+    Production (RunPod) continues to use qwen2.5:32b — no code change needed there.
+  • Root cause identified: 3b model could only extract one type of fact (location)
+    regardless of message content, causing every utterance to be stored as
+    user.location=<something>.
+
+FIX — Extraction prompt rewrite  (agents/memory/app/extractor.py → EXTRACTION_PROMPT)
+  • Previous prompt had a literal `"value": "Kerala"` in the example JSON; small
+    models copied it verbatim for every input regardless of actual content.
+    Changed to `"value": "<extracted_value_here>"` placeholder.
+  • Complete rewrite with 7 diverse few-shot examples covering all claim types:
+      A — name + birthplace (two STATE claims, importance 0.95, permanent)
+      B — spouse bereavement (two STATE claims, importance 0.95, permanent)
+      C — multi-entity family (four STATE claims across two children with locations)
+      D — BELIEF type + hobby STATE (distinguishes subjective opinion vs fact)
+      E — EVENT + relation + location (three claim types in one message)
+      F — doctor + health condition (medical STATE claims)
+      G — correction with corrects_entity (versioning / fact update)
+  • BELIEF type clarified: only fires when speaker uses explicit opinion language
+    ("I think", "I feel", "I believe", "I love", "I hate", "I trust").
+  • LLM timeout raised 30s → 90s; max_tokens raised 500 → 1200 to accommodate
+    multi-claim responses (e.g. a message that mentions two children generates 4 claims).
+  • INTENT_PROMPT rewritten with explicit examples so "tell me everything about X"
+    routes to HISTORY (not GENERAL), enabling full-profile retrieval.
+
+FIX — BELIEF write fallback  (agents/memory/app/main.py)
+  • LLM occasionally places the opinion subject in `entity` instead of
+    `entity_or_event`. The write gate silently dropped these claims.
+  • Fix: if `entity_or_event` is empty but `entity` is present, use `entity` as
+    `entity_or_event` before writing to belief_memory.
+
+NEW — Rigorous memory test suite  (test_memory_rigorous.py, 39 checks)
+  • Covers: health check, short-term storage, grounding facts, family relations,
+    belief layer, event layer, versioning/correction, deduplication, pronoun
+    resolution, transient stability, multi-speaker isolation, salience scoring,
+    episodic recall, world-knowledge filter, and intent classification.
+  • Relation assertions scan both entity and value fields (sons stored as
+    entity=David, attribute=relation_to_George, value=son — not value=David).
+  • Belief assertions accept both belief_memory encoding and STATE opinion_* fallback.
+  • All 39 checks pass against qwen2.5:7b local / qwen2.5:32b on RunPod.
+
+────────────────────────────────────────────────────────────────────────────────
 [2026-05-10]  Proactive health monitoring — watch data thresholds + alert system
 ────────────────────────────────────────────────────────────────────────────────
 
