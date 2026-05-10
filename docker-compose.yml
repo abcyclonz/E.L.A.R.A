@@ -156,6 +156,7 @@ services:
     environment:
       NODE_ENV: production
       BACKEND_URL: http://orchestrator:8001
+      PI_CAMERA_URL: ${PI_URL:-http://localhost:8765}
 
   perception_monitor:
     build:

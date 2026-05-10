@@ -233,9 +233,10 @@ section "7 / 7  Frontend"
 log "Setting up Next.js frontend..."
 pushd "$ROOT/frontend" > /dev/null
 [ -d node_modules ] || npm install --legacy-peer-deps --silent
-if BACKEND_URL="http://localhost:8003" npm run build >> "$LOGS/frontend_build.log" 2>&1; then
+if BACKEND_URL="http://localhost:8003" PI_CAMERA_URL="${PI_URL:-http://localhost:8765}" npm run build >> "$LOGS/frontend_build.log" 2>&1; then
     log "Frontend built — starting..."
     BACKEND_URL="http://localhost:8003" \
+    PI_CAMERA_URL="${PI_URL:-http://localhost:8765}" \
     NODE_ENV=production \
     npm start >> "$LOGS/frontend.log" 2>&1 &
     BGPIDS+=($!)
