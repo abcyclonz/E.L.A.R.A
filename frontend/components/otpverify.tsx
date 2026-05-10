@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, KeyboardEvent, ClipboardEvent, ChangeEvent } from "react";
-import { useAuth } from "@/components/auth-context";
 import { useRouter } from "next/navigation";
 
 type Status = { type: "success" | "error" | "loading"; message: string } | null;
@@ -13,7 +12,6 @@ export default function OtpVerify() {
   const [status, setStatus] = useState<Status>(null);
   const [verified, setVerified] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const { verifyOTP } = useAuth();
   const router = useRouter();
 
   const otp = digits.join("");
@@ -52,10 +50,24 @@ export default function OtpVerify() {
     if (!canSubmit) return;
     setStatus({ type: "loading", message: "Verifying…" });
     try {
-      await verifyOTP(otp);
+      const response = await fetch("/api/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: "USER_01",
+          user_input_otp: otp,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "OTP verification failed");
+      }
+
       setStatus({ type: "success", message: "Identity verified! Redirecting…" });
       setVerified(true);
-      setTimeout(() => router.replace("/"), 1500);
+      localStorage.setItem("elara_initial_otp_verified", "true");
+      setTimeout(() => router.replace("/login?mode=signup"), 1500);
     } catch (error) {
       setStatus({ type: "error", message: error instanceof Error ? error.message : "OTP verification failed" });
       setTimeout(() => {

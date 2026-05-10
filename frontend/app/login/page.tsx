@@ -317,6 +317,20 @@ export default function AuthPage() {
     if (!authLoading && isAuthenticated) router.replace('/')
   }, [isAuthenticated, authLoading, router])
 
+  useEffect(() => {
+    if (authLoading || isAuthenticated) return
+    const otpVerified = localStorage.getItem('elara_initial_otp_verified') === 'true'
+    if (!otpVerified) router.replace('/verify')
+  }, [authLoading, isAuthenticated, router])
+
+  useEffect(() => {
+    const nextMode = new URLSearchParams(window.location.search).get('mode')
+    if (nextMode === 'signup' || nextMode === 'login') {
+      setMode(nextMode)
+      setStep(0)
+    }
+  }, [])
+
   const switchMode = (m: Mode) => { setMode(m); setStep(0) }
 
   const ghostBtn: React.CSSProperties = {
