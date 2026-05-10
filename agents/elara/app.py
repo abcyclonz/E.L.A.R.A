@@ -431,3 +431,32 @@ def chat_stream(req: ChatRequest):
         yield f"data: {_json.dumps({'done': True, **_json.loads(final.model_dump_json())})}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")
+
+# ── Watch Data ────────────────────────────────────────────────────────────────
+
+class WatchDataRequest(_BaseModel):
+    session_id: str
+    hr:         int
+    battery:    int
+    steps:      int
+    temp:       float
+    timestamp:  Optional[str] = None
+
+
+class WatchDataResponse(_BaseModel):
+    status:     str = "received"
+    message:    str = "Watch data logged successfully"
+
+
+@app.post("/watchdata", response_model=WatchDataResponse)
+def receive_watchdata(req: WatchDataRequest) -> WatchDataResponse:
+    """
+    Receive and log watch/sensor data from the frontend.
+    This could be used for health monitoring, activity tracking, etc.
+    """
+    log.info(f"Received watch data for session {req.session_id}: HR={req.hr}, Battery={req.battery}%, Steps={req.steps}, Temp={req.temp}°C")
+    
+    # TODO: Store this data in a database or send to monitoring systems
+    # For now, just log it
+    
+    return WatchDataResponse()
