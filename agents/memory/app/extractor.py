@@ -56,7 +56,7 @@ Stability:
   transient = changes within days/weeks (plans, current activities)
 
 Return ONLY a JSON object:
-{{"claims": [{{"type": "STATE", "entity": "{speaker_name}", "attribute": "location", "value": "Kerala", "confidence": 0.95, "importance": 0.6, "stability": "stable", "topic": "location"}}]}}
+{{"claims": [{{"type": "STATE", "entity": "{speaker_name}", "attribute": "location", "value": "<extracted_value_here>", "confidence": 0.95, "importance": 0.6, "stability": "stable", "topic": "location"}}]}}
 
 For BELIEF: add "observer": "{speaker_name}", "entity_or_event": "<subject>"
 For EVENT:  add "entity_or_event": "<event_name>"
