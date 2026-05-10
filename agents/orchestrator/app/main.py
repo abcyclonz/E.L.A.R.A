@@ -692,7 +692,7 @@ async def sync_otp(data: OTPData, x_api_key: str = Header(...)):
     return {"status": "success"}
 
 
-@app.post("/verify-otp")
+@app.post("/verify")
 @limiter.limit("5/minute")
 async def verify_otp(request: Request, data: VerifyOtpRequest):
     """Called by the frontend to verify the OTP the user entered."""
