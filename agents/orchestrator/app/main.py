@@ -6,7 +6,7 @@ import requests as _requests
 import random
 import time
 import redis
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
@@ -41,6 +41,23 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event():
     auth.init_auth_db()
+    # Load audio models in background — orchestrator stays healthy immediately
+    import threading
+    def _load_audio():
+        try:
+            from app.audio_ws import pipeline as _audio_pipeline
+            _audio_pipeline.load()
+        except Exception as e:
+            import logging
+            logging.getLogger("audio_ws").error("Audio pipeline failed to load: %s", e)
+    threading.Thread(target=_load_audio, daemon=True).start()
+
+
+@app.websocket("/ws/audio")
+async def audio_websocket(websocket: WebSocket):
+    """Pi thin client connects here to stream raw PCM and receive TTS WAV."""
+    from app.audio_ws import handle_audio_ws
+    await handle_audio_ws(websocket, handle_input)
 
 
 # ---------------------------------------------------------------------------
@@ -254,17 +271,16 @@ def handle_input(req: AgentInput):
     # Fetch grounding facts once per turn — always present in Elara's context.
     grounding_facts = fetch_grounding(speaker_id)
 
-    # Derive user location: GPS city from request metadata (web frontend) OR memory-stored location.
-    ul = _requests.get("https://ipinfo.io/json").json()
-    city = ul.get('city')
-    region = ul.get('region')
-    if city and region:
-        user_location = f"{city}, {region}"
-    else:
-        user_location = None
-
-    # 3. Now the 'or' fallback will work correctly
-    user_location = user_location or _location_from_grounding(grounding_facts)
+    # Derive user location: browser GPS (most accurate) → memory → ipinfo fallback
+    user_location = (req.metadata or {}).get("location") or _location_from_grounding(grounding_facts)
+    if not user_location:
+        try:
+            ul = _requests.get("https://ipinfo.io/json", timeout=2).json()
+            city, region = ul.get('city'), ul.get('region')
+            if city and region:
+                user_location = f"{city}, {region}"
+        except Exception:
+            pass
     if user_location:
         print(f"[Location] Using: {user_location}")
 

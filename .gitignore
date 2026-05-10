@@ -34,7 +34,6 @@ agents/tools/assistant/google_auth/token.json
 
 # Logs
 *.log
-CLAUDE.md
 
 # Python venvs
 .venv/

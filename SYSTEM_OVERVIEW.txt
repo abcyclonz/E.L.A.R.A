@@ -9,6 +9,118 @@
 ================================================================================
 
 ────────────────────────────────────────────────────────────────────────────────
+[2026-05-10]  Voice pipeline moved to cloud — Pi thin client, DB ownership fix, location fix
+────────────────────────────────────────────────────────────────────────────────
+
+ARCHITECTURE CHANGE — Voice processing fully moved to RunPod
+  • Previously: Pi ran Silero VAD, Faster-Whisper STT, SpeechBrain speaker ID, and
+    Kokoro TTS locally. Required the Pi to have 4+ GB RAM and all ML models.
+  • Now: Pi is a thin audio terminal only.
+      Pi sends: raw PCM int16 frames (16kHz, mono, 512-frame chunks) over WebSocket
+      RunPod runs: VAD → STT → Speaker ID → Orchestrator → Elara → TTS
+      RunPod sends: Kokoro TTS WAV back to Pi for playback
+  • Pi mic is muted during TTS playback (threading.Event flag) to prevent echo.
+
+NEW — Audio Gateway  (agents/orchestrator/app/audio_ws.py)
+  • WebSocket endpoint at /ws/audio on the orchestrator (port 8001 Docker / 8003 native).
+  • AudioPipeline singleton loaded in background daemon thread at startup (non-blocking
+    so orchestrator health check passes before 2GB of models are downloaded).
+  • Pipeline components loaded once and reused per connection:
+      - Silero VAD (torch.hub, float32 normalized input)
+      - Faster-Whisper "base.en" (CPU int8)
+      - SpeechBrain ECAPA-TDNN (cosine similarity, threshold 0.25)
+  • VAD accumulates speech frames; on silence timeout (0.8s) sends phrase to STT+Speaker.
+  • Speaker embeddings persisted to /data/speaker_embeddings.json — survive restarts.
+  • After orchestrator pipeline runs, calls Elara /tts for Kokoro synthesis (best quality,
+    24kHz WAV). Sends WAV bytes back to Pi over the same WebSocket.
+  • Max message size: 10MB (handles long TTS responses).
+
+NEW — Pi Thin Client  (pi_client/)
+  • Self-contained folder designed to be copied to Pi and run with: bash run.sh
+  • audio_client.py: PyAudio mic → WebSocket → RunPod, receive WAV → PyAudio playback
+  • requirements.txt: pyaudio, websockets, python-dotenv (no ML dependencies)
+  • .env.example: template with ORCHESTRATOR_WS_URL pointing to RunPod proxy URL
+  • run.sh: installs portaudio, creates venv, installs deps, starts client
+  • Connection URL format: ws://<pod-id>-8001.proxy.runpod.net/ws/audio
+
+ORCHESTRATOR CHANGES
+  • Added WebSocket route @app.websocket("/ws/audio")
+  • Added torch, torchaudio, faster-whisper, speechbrain, websockets to requirements.txt
+  • Added libsndfile1 ffmpeg system deps to Dockerfile
+  • Added speaker_data Docker volume for embedding persistence
+
+BUG FIX — Memory completely non-functional (CRITICAL — broke all memory storage)
+  • Symptom: 0 rows stored in state_memory after many "store" turns.
+    Memory agent logs showed: "column 'importance' does not exist" and
+    "InsufficientPrivilege: must be owner of table state_memory".
+  • Root cause: init.sql creates all tables owned by the postgres superuser.
+    Memory agent connects as memory_user (granted ALL PRIVILEGES, but not OWNER).
+    PostgreSQL requires table OWNERSHIP — not just privileges — to run ALTER TABLE
+    or CREATE INDEX. All 4 startup migrations failed silently:
+      - _SPEAKER_ID_MIGRATION (adds speaker_id column)
+      - _PRIORITY_MIGRATION   (adds importance, stability, access_count)
+      - _GROUNDING_MIGRATION  (adds is_grounding)
+      - _EPISODES_DDL         (creates episodes table)
+    Result: columns never added → every INSERT failed → 0 memories stored.
+  • Fix applied on live pod: ran as postgres superuser:
+      ALTER TABLE state_memory    OWNER TO memory_user;
+      ALTER TABLE belief_memory   OWNER TO memory_user;
+      ALTER TABLE event_memory    OWNER TO memory_user;
+      ALTER TABLE episodes        OWNER TO memory_user;
+      ALTER TABLE memory_logs     OWNER TO memory_user;
+      ALTER TABLE topic_frequency OWNER TO memory_user;
+    Restarted memory agent → all 4 migrations ran → memory storage restored.
+  • PERMANENT FIX STILL NEEDED in start.sh (see KNOWN GAPS below).
+    Every fresh pod will have broken memory until start.sh is updated.
+
+BUG FIX — Location always returning RunPod datacenter city (Prague/Frankfurt)
+  • Symptom: Restaurant searches returned Prague results even when user said
+    "I am in Trivandrum". Elara confirmed "I understand you're in Trivandrum"
+    but then searched the wrong city anyway.
+  • Root cause: handle_input() called ipinfo.io first with no timeout. RunPod
+    server IP geolocates to a European datacenter. Browser GPS in
+    req.metadata["location"] was being silently discarded.
+  • Fix: Changed location priority order in handle_input():
+      1. req.metadata["location"]     — browser GPS (most accurate)
+      2. _location_from_grounding()   — extracted from memory grounding facts
+      3. ipinfo.io fallback           — only if above both empty, 2s timeout
+    This means browser-provided GPS always wins over server IP geolocation.
+
+LIVE RUN — First end-to-end test (pod: zir4n1cq9m84q9, 2026-05-10)
+  • Stack started natively via start.sh (no Docker — RunPod non-privileged pod).
+  • Frontend served at https://zir4n1cq9m84q9-3000.proxy.runpod.net
+  • Orchestrator at https://zir4n1cq9m84q9-8003.proxy.runpod.net
+  • Issues found: npm not in PATH (frontend failed silently) → fixed by installing
+    Node.js 20 via nodesource and starting frontend manually.
+  • Web chat tested: signup + login flow works, JWT gating works.
+  • Memory confirmed broken pre-fix, confirmed working post-fix.
+  • Location confirmed broken pre-fix, confirmed working post-fix.
+
+KNOWN GAPS — Pending work for next session
+  ★ CRITICAL: start.sh does not fix table ownership → fresh pod = broken memory.
+    Add after init.sql block in start.sh:
+      sudo -u postgres psql -d memory_db -c "
+        ALTER TABLE state_memory    OWNER TO memory_user;
+        ALTER TABLE belief_memory   OWNER TO memory_user;
+        ALTER TABLE event_memory    OWNER TO memory_user;
+        ALTER TABLE episodes        OWNER TO memory_user;
+        ALTER TABLE memory_logs     OWNER TO memory_user;
+        ALTER TABLE topic_frequency OWNER TO memory_user;
+      "
+    OR: add OWNER memory_user to each CREATE TABLE in init.sql (cleaner fix).
+  ★ PostgreSQL data is NOT persistent across pod deletion — need RunPod Network
+    Volume mounted at /var/lib/postgresql/data.
+  ★ Speaker embeddings (/data/speaker_embeddings.json) also lost on pod deletion.
+  • npm not in PATH: start.sh frontend section fails silently on fresh RunPod pods.
+    Fix: detect npm absence and auto-install Node.js, or document manual step.
+  • Audio WebSocket not yet tested with real Pi hardware — only client code written.
+  • Memory quality: Mistral 7B misses short/implicit claims. Test with qwen2.5:32b
+    or Groq API for better extraction on the memory agent's /process endpoint.
+  • ipinfo.io called on every turn — cache result in Redis (per speaker, 1h TTL).
+  • Orchestrator port mismatch: Docker exposes 8001, native start.sh uses 8003.
+    Pi client .env.example should note both variants.
+
+────────────────────────────────────────────────────────────────────────────────
 [2026-05-09]  Vision channel — Eye + Perception Monitor + Perception Learner
 ────────────────────────────────────────────────────────────────────────────────
 

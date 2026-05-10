@@ -1,5 +1,5 @@
 fastapi>=0.115.0
-uvicorn>=0.30.0
+uvicorn[standard]>=0.30.0
 requests>=2.32.0
 pydantic>=2.7.0
 pydantic-settings>=2.5.2
@@ -10,3 +10,10 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 bcrypt==3.2.2
 slowapi>=0.1.9
+# Audio gateway — VAD + STT + Speaker ID (runs in orchestrator process)
+torch>=2.2.0
+torchaudio>=2.2.0
+faster-whisper>=1.0.0
+speechbrain>=1.0.0
+numpy>=1.24.0
+websockets>=12.0
