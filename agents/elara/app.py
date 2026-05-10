@@ -34,6 +34,8 @@ from conversation_agent.adapter import (
     ConversationAdapter, ChatRequest, ChatResponse,
 )
 
+from health_monitor import check_watch_data, build_proactive_message
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
@@ -444,19 +446,43 @@ class WatchDataRequest(_BaseModel):
 
 
 class WatchDataResponse(_BaseModel):
-    status:     str = "received"
-    message:    str = "Watch data logged successfully"
+    status:         str            = "received"
+    message:        str            = "Watch data logged successfully"
+    alert:          bool           = False
+    elara_message:  Optional[str]  = None
+    issues:         list           = []
 
 
 @app.post("/watchdata", response_model=WatchDataResponse)
 def receive_watchdata(req: WatchDataRequest) -> WatchDataResponse:
     """
-    Receive and log watch/sensor data from the frontend.
-    This could be used for health monitoring, activity tracking, etc.
+    Receive watch/sensor data from the frontend.
+    Checks health thresholds and returns a proactive Elara message when any
+    reading is outside safe bounds (with a 10-minute per-issue cooldown).
     """
-    log.info(f"Received watch data for session {req.session_id}: HR={req.hr}, Battery={req.battery}%, Steps={req.steps}, Temp={req.temp}°C")
-    
-    # TODO: Store this data in a database or send to monitoring systems
-    # For now, just log it
-    
-    return WatchDataResponse()
+    log.info(
+        "Watch data | session=%s HR=%d Battery=%d%% Steps=%d Temp=%.1f°C",
+        req.session_id, req.hr, req.battery, req.steps, req.temp,
+    )
+
+    issues = check_watch_data(
+        session_id=req.session_id,
+        hr=req.hr,
+        battery=req.battery,
+        steps=req.steps,
+        temp=req.temp,
+    )
+
+    if not issues:
+        return WatchDataResponse()
+
+    elara_message = build_proactive_message(issues)
+    log.info("Health alert for session %s: %s", req.session_id, [i["key"] for i in issues])
+
+    return WatchDataResponse(
+        status="alert",
+        message="Health threshold breached — proactive message generated",
+        alert=True,
+        elara_message=elara_message,
+        issues=[i["key"] for i in issues],
+    )

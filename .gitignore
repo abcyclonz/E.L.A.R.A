@@ -24,6 +24,7 @@ MIC/tmp_model/
 
 # Reference system (not part of this project)
 LLM-Agent-For--elders-main/
+health_monitor_tool.py
 
 # Bandit lock files
 agents/elara/tables/.bandit.lock
