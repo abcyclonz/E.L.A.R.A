@@ -136,7 +136,7 @@ class AudioPipeline:
 
         best_score, best_id = -1.0, None
         for sid, known_emb in self._known_speakers.items():
-            score = F.cosine_similarity(embedding, known_emb, dim=1).item()
+            score = F.cosine_similarity(embedding, known_emb.to(embedding.device), dim=1).item()
             if score > best_score:
                 best_score, best_id = score, sid
 

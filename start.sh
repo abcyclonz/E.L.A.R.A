@@ -238,14 +238,20 @@ log "Setting up Next.js frontend..."
 pushd "$ROOT/frontend" > /dev/null
 [ -d node_modules ] || npm install --legacy-peer-deps --silent
 if BACKEND_URL="http://localhost:8003" PI_CAMERA_URL="${PI_URL:-http://localhost:8765}" npm run build >> "$LOGS/frontend_build.log" 2>&1; then
-    log "Frontend built — starting..."
+    log "Frontend built — starting on port 3002..."
     BACKEND_URL="http://localhost:8003" \
     PI_CAMERA_URL="${PI_URL:-http://localhost:8765}" \
     NODE_ENV=production \
+    PORT=3002 \
     npm start >> "$LOGS/frontend.log" 2>&1 &
     BGPIDS+=($!)
+    wait_url "http://localhost:3002" "frontend" 60
+
+    log "Starting WS proxy (port 3000 → Next.js 3002, /ws/audio → orchestrator 8003)..."
+    node "$ROOT/frontend/ws-proxy.js" >> "$LOGS/ws_proxy.log" 2>&1 &
+    BGPIDS+=($!)
     popd > /dev/null
-    wait_url "http://localhost:3000" "frontend" 60
+    wait_url "http://localhost:3000" "ws_proxy" 15
 else
     popd > /dev/null
     warn "Frontend build failed — backend services are still running. Check logs/frontend_build.log"
