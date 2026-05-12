@@ -40,10 +40,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedToken = localStorage.getItem('memora_token')
     const storedSessionId = localStorage.getItem('memora_session_id')
     if (storedUser && storedToken && storedSessionId) {
-      const userData = JSON.parse(storedUser)
-      setUser(userData)
-      setIsAuthenticated(true)
-      setSessionId(storedSessionId)
+      try {
+        const userData = JSON.parse(storedUser)
+        setUser(userData)
+        setIsAuthenticated(true)
+        setSessionId(storedSessionId)
+      } catch {
+        // Corrupt/tampered localStorage — clear it and boot the user to a clean state
+        localStorage.removeItem('memora_user')
+        localStorage.removeItem('memora_token')  // adjust key names to match yours
+        localStorage.removeItem('memora_session_id')
+        localStorage.removeItem('elara_initial_otp_verified')
+      }
     }
     setAuthLoading(false)
   }, [])
@@ -104,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          email: userData.email || 'user@example.com',
+          email: userData.email,
           password: userData.password,
           full_name: userData.fullName,
           age: userData.age,

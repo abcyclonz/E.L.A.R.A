@@ -60,14 +60,17 @@ export default function OtpVerify() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "OTP verification failed");
+        const errorData = await response.json()
+        throw new Error(errorData.detail || "OTP verification failed")
       }
 
-      setStatus({ type: "success", message: "Identity verified! Redirecting…" });
-      setVerified(true);
-      localStorage.setItem("elara_initial_otp_verified", "true");
-      setTimeout(() => router.replace("/login?mode=signup"), 1500);
+      const data = await response.json()
+      if (data.status !== "verified") {
+        throw new Error("Verification failed — unexpected response")
+      }
+
+      localStorage.setItem("elara_initial_otp_verified", "true")
+      setTimeout(() => router.replace("/login?mode=login"), 1500)
     } catch (error) {
       setStatus({ type: "error", message: error instanceof Error ? error.message : "OTP verification failed" });
       setTimeout(() => {

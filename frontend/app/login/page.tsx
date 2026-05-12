@@ -264,6 +264,15 @@ function Step2Face({ signupData, onDone }: { signupData: Record<string, string>;
           conversationGoals: [],
           additionalInfo: ''
         })
+
+        const token = localStorage.getItem('memora_token')
+        if (token) {
+          await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/register-device`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: 'USER_01', user_token: token }),
+          }).catch(() => console.warn('Device registration failed — non-fatal'))
+        }
         onDone()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Signup failed')
@@ -331,19 +340,30 @@ function LoginForm({ onDone }: { onDone: () => void }) {
     setForm(f => ({ ...f, [k]: e.target.value }))
   const valid = form.email.includes('@') && form.password.length >= 1
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!valid || loading) return
-    setLoading(true)
-    try {
-      await login(form.email, form.password)
-      onDone()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Login failed')
-    } finally {
-      setLoading(false)
-    }
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault()
+  if (!valid || loading) return
+  setLoading(true)
+  try {
+    await login(form.email, form.password)
+
+      const token = localStorage.getItem('memora_token')
+      if (token) {
+        await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/register-device`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: 'USER_01', user_token: token }),
+        }).catch(() => console.warn('Device registration failed — non-fatal'))
+      }
+
+
+    onDone()
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : 'Login failed')
+  } finally {
+    setLoading(false)
   }
+}
 
   return (
     <form onSubmit={handleSubmit} className="e-anim-in" style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -370,14 +390,19 @@ export default function AuthPage() {
   const [signupData, setSignupData] = useState<Record<string, string> | null>(null)
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated) router.replace('/')
-  }, [isAuthenticated, authLoading, router])
+  if (authLoading) return
 
-  useEffect(() => {
-    if (authLoading || isAuthenticated) return
-    const otpVerified = localStorage.getItem('elara_initial_otp_verified') === 'true'
-    if (!otpVerified) router.replace('/verify')
-  }, [authLoading, isAuthenticated, router])
+  if (isAuthenticated) {
+    router.replace('/')
+    return
+  }
+
+  const otpVerified = localStorage.getItem('elara_initial_otp_verified') === 'true'
+  if (!otpVerified) {
+    router.replace('/verify')   
+    return
+  }
+}, [authLoading, isAuthenticated, router])
 
   useEffect(() => {
     const nextMode = new URLSearchParams(window.location.search).get('mode')

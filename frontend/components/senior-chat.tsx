@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
+import { toast } from "sonner"
 import { useAuth } from "@/components/auth-context"
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -356,7 +357,7 @@ function BrowserChatMode({ userName, sessionId }: { userName: string; sessionId:
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [userCity, setUserCity] = useState<string>('')
+  const userCityRef = useRef<string>('')
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight }, [messages])
@@ -374,7 +375,7 @@ function BrowserChatMode({ userName, sessionId }: { userName: string; sessionId:
         const addr = data.address || {}
         const city = addr.city || addr.town || addr.village || addr.suburb || addr.county || ''
         const state = addr.state || ''
-        setUserCity(city ? `${city}${state ? ', ' + state : ''}` : '')
+        userCityRef.current = city ? `${city}${state ? ', ' + state : ''}` : ''
       } catch { /* location optional — silently skip */ }
     }, () => { /* permission denied — silently skip */ })
   }, [])
@@ -382,12 +383,15 @@ function BrowserChatMode({ userName, sessionId }: { userName: string; sessionId:
   const send = useCallback(async () => {
     const txt = input.trim()
     if (!txt || loading) return
+    
     setInput('')
     const userMsg: Message = { role: 'user', text: txt, ts: new Date() }
     setMessages(m => [...m, userMsg])
     setLoading(true)
+  
     try {
       const allMsgs = [...messages, userMsg].map(m => ({ role: m.role, content: m.text }))
+      
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -396,18 +400,44 @@ function BrowserChatMode({ userName, sessionId }: { userName: string; sessionId:
           agentState: {
             sessionId,
             userToken: typeof window !== 'undefined' ? localStorage.getItem('memora_token') : null,
-            location: userCity || null
+            location: userCityRef.current || null
           }
         })
-      }).catch(() => null)
-      let reply: string | undefined
-      if (res?.ok) { const d = await res.json().catch(() => null); reply = d?.message?.content }
-      if (!reply) {
-        await new Promise(r => setTimeout(r, 800 + Math.random() * 600))
-        reply = ["That sounds lovely. Tell me more.", "I'll make a note of that.", "Of course! Happy to help.", "Shall we plan it together?", "I hear you. Want me to remind you later?"][Math.floor(Math.random() * 5)]
+      }).catch(() => null) // This catches true network failures (DNS, Offline)
+  
+      // 1. Handle True Network Failure (Fetch failed to execute)
+      if (!res) {
+        toast.error('Network error. Please check your connection.')
+        setMessages(m => m.slice(0, -1))
+        return
       }
-      setMessages(m => [...m, { role: 'assistant', text: reply!, ts: new Date() }])
-    } finally { setLoading(false) }
+  
+      // 2. Handle API Errors (4xx, 5xx)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.error || (res.status === 401 ? 'Session expired' : 'Server error');
+        
+        toast.error(`Elara: ${errorMessage}`)
+        // Optional: don't remove user message so they can retry later
+        return
+      }
+  
+      // 3. Parse Success Response
+      const d = await res.json().catch(() => null)
+      const reply = d?.message?.content
+  
+      if (!reply) {
+        toast.error('Elara returned an empty response. Please try again.')
+        return
+      }
+  
+      setMessages(m => [...m, { role: 'assistant', text: reply, ts: new Date() }])
+  
+    } catch (err) {
+      toast.error('An unexpected error occurred.')
+    } finally {
+      setLoading(false)
+    }
   }, [input, loading, messages, sessionId])
 
   const fmt = (ts: Date) => ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -468,19 +498,57 @@ function BrowserChatMode({ userName, sessionId }: { userName: string; sessionId:
 // ── Memories Panel ─────────────────────────────────────────────────────────
 function MemoriesPanel({ onClose, sessionId }: { onClose: () => void; sessionId: string | null }) {
   const [mems, setMems] = useState<MemoryItem[] | null>(null)
+  const [memsError, setMemsError] = useState(false)
+
+  const loadMemories = useCallback(async () => {
+    if (!sessionId) {
+      setTimeout(() => setMems([]), 600)
+      return
+    }
+  
+    setMems(null)
+    setMemsError(false)
+  
+    try {
+      const r = await fetch(`/api/memories/${sessionId}`)
+  
+      // 1. Handle HTTP errors (401, 403, 500, etc.)
+      if (!r.ok) {
+        console.error(`API Error: ${r.status} ${r.statusText}`)
+        setMemsError(true)
+        setMems([]) 
+        return 
+      }
+  
+      // 2. Safety check: Is the response actually JSON?
+      const contentType = r.headers.get("content-type")
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new TypeError("Oops, we didn't get JSON back from the server.")
+      }
+  
+      const d = await r.json()
+      
+      // 3. Process the data
+      const facts: any[] = d.facts || []
+      const items: MemoryItem[] = facts.slice(0, 10).map((f: any, i: number) => ({
+        id: i,
+        date: 'Recent',
+        text: f.document || String(f)
+      }))
+  
+      setMems(items)
+  
+    } catch (err) {
+      // 4. This catches Network outages AND JSON parsing errors
+      console.error("Fetch/Runtime Error:", err)
+      setMemsError(true)
+      setMems([]) 
+    }
+  }, [sessionId])
 
   useEffect(() => {
-    if (!sessionId) { setTimeout(() => setMems([]), 600); return }
-    fetch(`/api/memories/${sessionId}`)
-      .then(r => r.json())
-      .then(d => {
-        const items: MemoryItem[] = []
-        const facts: any[] = d.facts || []
-        facts.slice(0, 10).forEach((f: any, i: number) => items.push({ id: i, date: 'Recent', text: f.document || String(f) }))
-        setMems(items.length ? items : [])
-      })
-      .catch(() => setMems([]))
-  }, [sessionId])
+    loadMemories()
+  }, [loadMemories])
 
   return (
     <div className="e-side-panel" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -494,15 +562,36 @@ function MemoriesPanel({ onClose, sessionId }: { onClose: () => void; sessionId:
             <IcX size={18} />
           </button>
         </div>
+        
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 28px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!mems ? (
+          {/* 1. Loading State */}
+          {!mems && !memsError && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'oklch(0.58 0.02 200)', fontSize: 14, marginTop: 24 }}>
               <div style={{ width: 16, height: 16, border: '2px solid rgba(0,0,0,0.1)', borderTopColor: 'oklch(0.35 0.10 145)', borderRadius: '50%', animation: 'elaraSpin .7s linear infinite' }} />
               Loading memories…
             </div>
-          ) : mems.length === 0 ? (
+          )}
+
+          {/* 2. Error State */}
+          {memsError && (
+            <div style={{ padding: '16px', background: 'oklch(0.97 0.01 20)', borderRadius: 12, border: '1px solid oklch(0.90 0.04 20)', marginTop: 12 }}>
+              <div style={{ fontSize: 14, color: 'oklch(0.45 0.15 20)', fontWeight: 600 }}>Couldn't load memories</div>
+              <button 
+                onClick={loadMemories}
+                style={{ background: 'none', border: 'none', padding: 0, color: 'oklch(0.45 0.15 20)', fontSize: 13, textDecoration: 'underline', cursor: 'pointer', marginTop: 4 }}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {/* 3. Empty State */}
+          {mems && mems.length === 0 && !memsError && (
             <div style={{ fontSize: 14, color: 'oklch(0.58 0.02 200)', marginTop: 24 }}>No memories stored yet.</div>
-          ) : mems.map(m => (
+          )}
+
+          {/* 4. Success List */}
+          {mems && mems.length > 0 && mems.map(m => (
             <div key={m.id} style={{ padding: '14px 16px', background: 'rgba(255,255,255,0.6)', borderRadius: 12, border: '1px solid rgba(0,0,0,0.07)', backdropFilter: 'blur(8px)' }}>
               <div style={{ fontSize: 11, color: 'oklch(0.35 0.10 145)', fontWeight: 700, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{m.date}</div>
               <div style={{ fontSize: 14, color: 'oklch(0.13 0.01 145)', lineHeight: 1.55 }}>{m.text}</div>

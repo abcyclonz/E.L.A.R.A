@@ -12,7 +12,7 @@ export default function Page() {
   useEffect(() => {
     if (authLoading || isAuthenticated) return
     const otpVerified = localStorage.getItem('elara_initial_otp_verified') === 'true'
-    router.replace(otpVerified ? '/login?mode=signup' : '/verify')
+    router.replace(otpVerified ? '/login' : '/verify')
   }, [isAuthenticated, authLoading, router])
 
   if (authLoading) return null
