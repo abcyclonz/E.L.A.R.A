@@ -1,0 +1,14 @@
+certifi==2026.4.22
+charset-normalizer==3.4.7
+colorzero==2.0
+gpiozero==2.0.1
+idna==3.13
+lgpio==0.2.2.0
+numpy==2.4.4
+pyserial==3.5
+requests==2.33.1
+RPLCD==1.4.0
+scipy==1.17.1
+setuptools==82.0.1
+smbus2==0.6.1
+urllib3==2.6.3
