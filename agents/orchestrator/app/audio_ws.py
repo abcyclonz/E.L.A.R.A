@@ -14,10 +14,12 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
 import numpy as np
+import redis.asyncio as aioredis
 import torch
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -29,7 +31,22 @@ MIN_AUDIO_LEN    = 0.5      # minimum phrase duration to process
 SAMPLE_RATE      = 16000
 BYTES_PER_SAMPLE = 2        # int16
 
-ELARA_URL = os.environ.get("ELARA_URL", "http://elara:8002")
+ELARA_URL    = os.environ.get("ELARA_URL", "http://elara:8002")
+_REDIS_HOST  = os.environ.get("REDIS_HOST", "redis")
+_REDIS_PORT  = int(os.environ.get("REDIS_PORT", 6379))
+TRANSCRIPT_CHANNEL = "elara:transcript"
+
+
+async def _publish_transcript(who: str, speaker: str, text: str) -> None:
+    """Fire-and-forget publish to the live transcript channel."""
+    try:
+        rc = aioredis.Redis(host=_REDIS_HOST, port=_REDIS_PORT, db=0)
+        payload = json.dumps({"who": who, "speaker": speaker, "text": text,
+                              "ts": datetime.now(timezone.utc).isoformat()})
+        await rc.publish(TRANSCRIPT_CHANNEL, payload)
+        await rc.aclose()
+    except Exception as e:
+        log.warning("Transcript publish failed: %s", e)
 
 # Speaker embeddings persist across restarts
 _SPEAKER_PATH = os.environ.get("SPEAKER_EMBEDDINGS_PATH", "/data/speaker_embeddings.json")
@@ -236,6 +253,7 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
                             continue
 
                         log.info("[%s] %s", speaker, text)
+                        asyncio.ensure_future(_publish_transcript("user", speaker, text))
 
                         # ── Orchestrator pipeline ─────────────────────────────
                         from app.models import AgentInput
@@ -244,6 +262,8 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
 
                         if not result or not result.reply:
                             continue
+
+                        asyncio.ensure_future(_publish_transcript("elara", speaker, result.reply))
 
                         # ── TTS → WAV back to Pi ──────────────────────────────
                         try:

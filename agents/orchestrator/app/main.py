@@ -1,4 +1,6 @@
+import asyncio
 import hmac
+import json
 import os
 import re
 import httpx
@@ -6,9 +8,12 @@ import requests as _requests
 import random
 import time
 import redis
+import redis.asyncio as aioredis
 import secrets
+from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, Request, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -270,7 +275,7 @@ def get_memories(user_id: str):
 
 
 @app.post("/input", response_model=OrchestrationResult)
-def handle_input(req: AgentInput, http_req: Request):
+def handle_input(req: AgentInput, http_req: Request = None):
     """
     Main entry point. LLM router decides what to do:
 
@@ -293,8 +298,8 @@ def handle_input(req: AgentInput, http_req: Request):
 
     # Derive user location: browser GPS (most accurate) → memory → ipinfo fallback
     user_location = (req.metadata or {}).get("location") or _location_from_grounding(grounding_facts)
-    x_forwarded = (http_req.headers or {}).get("X-Forwarded-For")
-    client_ip = x_forwarded.split(',')[0] if x_forwarded else None  
+    x_forwarded = (http_req.headers if http_req else {}).get("X-Forwarded-For")
+    client_ip = x_forwarded.split(',')[0] if x_forwarded else None
     if not user_location:
         try:
         # Use the client_ip if available, otherwise it defaults to the server IP (bad)
@@ -623,6 +628,37 @@ def _build_memory_payload(req: AgentInput, emotion: str = None) -> dict:
             **(req.metadata or {})
         }
     }
+
+
+@app.get("/transcript/stream")
+async def transcript_stream(user_token: str, request: Request):
+    """SSE stream of live transcript events from the Pi audio pipeline."""
+    user_id = auth.verify_token(user_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    async def event_generator():
+        rc = aioredis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
+        pubsub = rc.pubsub()
+        await pubsub.subscribe("elara:transcript")
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if msg and msg.get("type") == "message":
+                    yield f"data: {msg['data'].decode()}\n\n"
+                else:
+                    yield ": ping\n\n"  # keep-alive heartbeat
+        finally:
+            await pubsub.unsubscribe("elara:transcript")
+            await rc.aclose()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/health")

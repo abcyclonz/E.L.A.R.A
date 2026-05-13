@@ -28,18 +28,6 @@ const IcPhone = ({ size = 18 }) => <Ic size={size} d={<><rect x="5" y="2" width=
 const IcHelp = ({ size = 18 }) => <Ic size={size} d={<><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" strokeWidth={3} /></>} />
 const IcChevron = ({ size = 16 }) => <Ic size={size} sw={2} d={<polyline points="9 18 15 12 9 6" />} />
 
-// ── Mock transcript data ───────────────────────────────────────────────────
-const TRANSCRIPT = [
-  { who: 'robot', text: "Good morning! How did you sleep?" },
-  { who: 'user', text: "Not too bad. A little stiff." },
-  { who: 'robot', text: "Want me to walk you through your morning stretches?" },
-  { who: 'user', text: "Yes, that would be lovely." },
-  { who: 'robot', text: "Let's start with shoulder rolls — ten times, nice and slow." },
-  { who: 'user', text: "Okay, doing it now." },
-  { who: 'robot', text: "Excellent. And backward now, same count." },
-  { who: 'user', text: "Done. That feels better already." },
-  { who: 'robot', text: "Great! Neck stretches next?" },
-]
 
 // ── Pi Camera Feed ─────────────────────────────────────────────────────────
 function PiCameraFeed({ sleeping }: { sleeping: boolean }) {
@@ -223,28 +211,48 @@ function OverrideModal({ data, onApply, onClose }: { data: WatchData; onApply: (
 }
 
 // ── Live Transcript ────────────────────────────────────────────────────────
+interface TranscriptLine { who: string; text: string }
+
 function LiveTranscript({ muted, userName }: { muted: boolean; userName: string }) {
-  const [lines, setLines] = useState(TRANSCRIPT.slice(0, 3))
+  const [lines, setLines] = useState<TranscriptLine[]>([])
+  const [connected, setConnected] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const idxRef = useRef(3)
 
   useEffect(() => {
     if (muted) return
-    const t = setInterval(() => {
-      if (idxRef.current < TRANSCRIPT.length) setLines(l => [...l, TRANSCRIPT[idxRef.current++]])
-      else { idxRef.current = 0; setLines([TRANSCRIPT[0]]) }
-    }, 2800)
-    return () => clearInterval(t)
+    const token = typeof window !== 'undefined' ? localStorage.getItem('memora_token') : null
+    if (!token) return
+
+    const es = new EventSource(`/api/transcript/stream?token=${encodeURIComponent(token)}`)
+
+    es.onopen = () => setConnected(true)
+    es.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data) as { who: string; text: string }
+        setLines(l => [...l.slice(-19), { who: event.who, text: event.text }])
+      } catch {}
+    }
+    es.onerror = () => setConnected(false)
+
+    return () => { es.close(); setConnected(false) }
   }, [muted])
 
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight }, [lines])
 
   return (
     <div ref={scrollRef} style={{ height: 200, overflowY: 'auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {!muted && lines.length === 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'oklch(0.58 0.02 200)', fontSize: 13, padding: '16px 0' }}>
+          {connected
+            ? <><div style={{ width: 6, height: 6, borderRadius: '50%', background: 'oklch(0.50 0.15 145)', animation: 'elaraPulse 1.5s ease infinite' }} /> Listening…</>
+            : 'Waiting for Pi connection…'
+          }
+        </div>
+      )}
       {lines.map((l, i) => (
-        <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', opacity: 0.65 + 0.35 * (i / lines.length) }}>
-          <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: l.who === 'robot' ? 'oklch(0.35 0.10 145 / 0.15)' : 'rgba(0,0,0,0.07)', fontSize: 9, fontWeight: 700, color: l.who === 'robot' ? 'oklch(0.35 0.10 145)' : 'oklch(0.58 0.02 200)' }}>
-            {l.who === 'robot' ? 'E' : userName[0]?.toUpperCase() || 'U'}
+        <div key={i} style={{ display: 'flex', gap: 9, alignItems: 'flex-start', opacity: 0.65 + 0.35 * (i / Math.max(lines.length, 1)) }}>
+          <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: l.who === 'elara' ? 'oklch(0.35 0.10 145 / 0.15)' : 'rgba(0,0,0,0.07)', fontSize: 9, fontWeight: 700, color: l.who === 'elara' ? 'oklch(0.35 0.10 145)' : 'oklch(0.58 0.02 200)' }}>
+            {l.who === 'elara' ? 'E' : userName[0]?.toUpperCase() || 'U'}
           </div>
           <div style={{ fontSize: 13.5, color: 'oklch(0.13 0.01 145)', lineHeight: 1.55, paddingTop: 3 }}>{l.text}</div>
           {i === lines.length - 1 && !muted && (
