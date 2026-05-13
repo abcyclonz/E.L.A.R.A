@@ -17,7 +17,9 @@ export default function VerifyOtpPage() {
     }
     const otpVerified = localStorage.getItem('elara_initial_otp_verified') === 'true';
     if (otpVerified) {
-      router.replace('/login?mode=signup');
+      router.replace('/login'); // already verified — get them out of /verify
+    } else {
+      router.replace('/verify'); // not verified — keep them here (self-redirect is a no-op in Next.js)
     }
   }, [authLoading, isAuthenticated, router]);
 

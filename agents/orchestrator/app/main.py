@@ -6,6 +6,7 @@ import requests as _requests
 import random
 import time
 import redis
+import secrets
 from fastapi import FastAPI, HTTPException, Request, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -192,7 +193,7 @@ def login_endpoint(req: LoginRequest):
 # ---------------------------------------------------------------------------
 
 @app.post("/chat")
-def chat_endpoint(req: ChatRequest):
+def chat_endpoint(req: ChatRequest, request : Request):
     # Verify token
     user_id = auth.verify_token(req.user_token)
     if not user_id:
@@ -209,7 +210,7 @@ def chat_endpoint(req: ChatRequest):
         scene=None,
         metadata={"location": req.location} if req.location else {},
     )
-    result = handle_input(agent_input)
+    result = handle_input(agent_input, request)
 
     return {
         "ai_response": result.reply,
@@ -269,7 +270,7 @@ def get_memories(user_id: str):
 
 
 @app.post("/input", response_model=OrchestrationResult)
-def handle_input(req: AgentInput):
+def handle_input(req: AgentInput, http_req: Request):
     """
     Main entry point. LLM router decides what to do:
 
@@ -292,9 +293,13 @@ def handle_input(req: AgentInput):
 
     # Derive user location: browser GPS (most accurate) → memory → ipinfo fallback
     user_location = (req.metadata or {}).get("location") or _location_from_grounding(grounding_facts)
+    x_forwarded = (http_req.headers or {}).get("X-Forwarded-For")
+    client_ip = x_forwarded.split(',')[0] if x_forwarded else None  
     if not user_location:
         try:
-            ul = _requests.get("https://ipinfo.io/json", timeout=2).json()
+        # Use the client_ip if available, otherwise it defaults to the server IP (bad)
+            url = f"https://ipinfo.io/{client_ip}/json" if client_ip else "https://ipinfo.io/json"
+            ul = _requests.get(url, timeout=2).json()
             city, region = ul.get('city'), ul.get('region')
             if city and region:
                 user_location = f"{city}, {region}"
@@ -637,7 +642,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ---------------------------------------------------------------------------
 
 SHARED_SECRET: str = os.getenv("SHARED_SECRET", "your_shared_secret_key_123")
-REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT: int = int(os.getenv("REDIS_PORT", 6379))
 
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
@@ -650,8 +655,7 @@ def verify_api_key(x_api_key: str) -> None:
     if not hmac.compare_digest(x_api_key, SHARED_SECRET):
         raise HTTPException(status_code=403, detail="Forbidden: invalid API key")
 
-
-def redis_set(key: str, value: str, ex: int) -> None:
+def redis_set(key: str, value: str, ex: int = None) -> None:
     try:
         r.set(key, value, ex=ex)
     except redis.RedisError as e:
@@ -685,69 +689,122 @@ def status_key(user_id: str) -> str:
 
 class OTPData(BaseModel):
     otp: str
-    user_id: str = "USER_01"       # ← updated
+    user_id: str = "USER_01"
     expires_in: int = 300
 
 
 class VerifyOtpRequest(BaseModel):
-    user_id: str = "USER_01"       # ← updated
+    user_id: str = "USER_01"
     user_input_otp: str
+
+class RegisterDeviceRequest(BaseModel):
+    device_id: str          # physical Pi ID e.g. "USER_01"
+    user_token: str         # JWT from /auth/login
+
+
+# ---------------------------------------------------------------------------
+# Key helpers  (add these alongside your existing otp_key / status_key)
+# ---------------------------------------------------------------------------
+
+def token_key(user_id: str) -> str:
+    return f"device_token:{user_id}"
+
+def device_key(device_id: str) -> str:
+    """Maps a physical device ID → authenticated user UUID."""
+    return f"device_reg:{device_id}"
+
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
+
+@app.post("/register-device")
+def register_device(req: RegisterDeviceRequest):
+    """
+    Called by the frontend after login to bind a Pi device to a real user UUID.
+    Stored in Redis for 30 days (refreshed on each login).
+    """
+    user_id = auth.verify_token(req.user_token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    redis_set(device_key(req.device_id), user_id, ex=60 * 60 * 24 * 30)
+    print(f"[Device] Registered {req.device_id} → {user_id}")
+    return {"status": "registered", "user_id": user_id}
+
+def resolve_user_id(device_id: str) -> str:
+    """
+    Resolve a physical device_id (e.g. USER_01) to the real authenticated
+    user UUID. Falls back to device_id itself if no mapping exists yet
+    (i.e. during first-time registration before any login).
+    """
+    stored = redis_get(device_key(device_id))
+    if stored:
+        return stored.decode("utf-8")
+    return device_id          # fallback: first-time setup, no mapping yet
+
+
 @app.post("/sync-otp")
 async def sync_otp(data: OTPData, x_api_key: str = Header(...)):
-    """Called by the Pi to push a fresh OTP."""
     verify_api_key(x_api_key)
+    real_user_id = resolve_user_id(data.user_id)      # ← resolve here
 
     ttl = max(10, min(data.expires_in, 3600))
-    redis_set(otp_key(data.user_id), data.otp, ex=ttl)
-
-    # Clear any previous verified status when a new OTP is synced
-    redis_delete(status_key(data.user_id))
-
+    redis_set(otp_key(real_user_id), data.otp, ex=ttl)
+    redis_delete(status_key(real_user_id))
     return {"status": "success"}
 
+
+@app.get("/connection-status")
+async def connection_status(user_id: str = "USER_01", x_api_key: str = Header(...)):
+    verify_api_key(x_api_key)
+    real_user_id = resolve_user_id(user_id)           # ← resolve here
+
+    status_bytes = redis_get(status_key(real_user_id))
+    if status_bytes:
+        status_str = status_bytes.decode("utf-8")
+        if status_str.startswith("verified:"):
+            device_token = status_str.split(":", 1)[1]
+            redis_delete(status_key(real_user_id))
+            return {"verified": True, "device_token": device_token}
+
+    return {"verified": False, "device_token": None}
+
+
+@app.get("/verify-token")
+async def verify_token(user_id: str = "USER_01", token: str = "", x_api_key: str = Header(...)):
+    verify_api_key(x_api_key)
+    real_user_id = resolve_user_id(user_id)           # ← resolve here
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Token missing")
+
+    stored_bytes = redis_get(token_key(real_user_id))
+    if stored_bytes is None:
+        raise HTTPException(status_code=401, detail="No token registered for this device")
+
+    if hmac.compare_digest(token, stored_bytes.decode("utf-8")):
+        return {"valid": True}
+
+    raise HTTPException(status_code=401, detail="Invalid token")
 
 @app.post("/verify")
 @limiter.limit("5/minute")
 async def verify_otp(request: Request, data: VerifyOtpRequest):
-    """Called by the frontend to verify the OTP the user entered."""
-    stored_bytes = redis_get(otp_key(data.user_id))
+    real_user_id = resolve_user_id(data.user_id)      # ← resolve here
 
+    stored_bytes = redis_get(otp_key(real_user_id))
     if stored_bytes is None:
         raise HTTPException(status_code=404, detail="OTP expired or not found")
 
-    stored_otp = stored_bytes.decode("utf-8")
+    if hmac.compare_digest(data.user_input_otp, stored_bytes.decode("utf-8")):
+        redis_delete(otp_key(real_user_id))
 
-    if hmac.compare_digest(data.user_input_otp, stored_otp):
-        redis_delete(otp_key(data.user_id))
-
-        # Set verified flag for Pi to detect — expires in 60s
-        redis_set(status_key(data.user_id), "verified", ex=60)
+        device_token = secrets.token_hex(32)
+        redis_set(token_key(real_user_id), device_token, ex=60 * 60 * 24 * 30)
+        redis_set(status_key(real_user_id), f"verified:{device_token}", ex=60)
 
         return {"status": "verified"}
 
     raise HTTPException(status_code=401, detail="Invalid OTP")
-
-
-@app.get("/connection-status")
-async def connection_status(
-    user_id: str = "USER_01",      # ← updated
-    x_api_key: str = Header(...)
-):
-    """
-    Called by the Pi to check if the frontend verified the OTP.
-    One-shot: returns verified=True once, then clears the flag.
-    """
-    verify_api_key(x_api_key)
-
-    status_bytes = redis_get(status_key(user_id))
-
-    if status_bytes and status_bytes.decode("utf-8") == "verified":
-        redis_delete(status_key(user_id))
-        return {"verified": True}
-
-    return {"verified": False}
