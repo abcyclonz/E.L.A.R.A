@@ -74,6 +74,7 @@ class AudioPipeline:
         self._load_stt()
         self._load_speaker_encoder()
         self._load_speaker_embeddings()
+        print("✅ Audio pipeline fully loaded — ready to receive speech.", flush=True)
 
     def _load_vad(self):
         log.info("Loading Silero VAD…")
@@ -97,9 +98,12 @@ class AudioPipeline:
     def _load_speaker_encoder(self):
         log.info("Loading SpeechBrain ECAPA-TDNN…")
         from speechbrain.inference.speaker import EncoderClassifier
+        import torch
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self._encoder = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir="/data/speaker_model",
+            run_opts={"device": device},
         )
         log.info("Speaker encoder ready.")
 
@@ -132,7 +136,13 @@ class AudioPipeline:
 
     # ── VAD ───────────────────────────────────────────────────────────────────
 
+    @property
+    def is_loaded(self) -> bool:
+        return self._vad_model is not None and self._stt_model is not None and self._encoder is not None
+
     def is_speech(self, chunk_bytes: bytes) -> bool:
+        if self._vad_model is None:
+            return False  # pipeline still loading — treat as silence
         audio   = np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         tensor  = torch.from_numpy(audio)
         prob    = self._vad_model(tensor, SAMPLE_RATE).item()
@@ -145,7 +155,8 @@ class AudioPipeline:
     _INITIAL_PROMPT = (
         "Kerala, Kochi, Thrissur, Kozhikode, Alappuzha, Kannur, Thiruvananthapuram, "
         "Calicut, Trivandrum, Malayalam, India, Karnataka, Tamil Nadu, Bangalore, "
-        "Hyderabad, Mumbai, Delhi."
+        "Hyderabad, Mumbai, Delhi, Chief Minister, Prime Minister, Member of Parliament, "
+        "Panchayat, Lok Sabha, Rajya Sabha, rupees, crore, lakh."
     )
 
     def transcribe(self, audio_bytes: bytes, initial_prompt: str = "") -> str:
@@ -164,6 +175,8 @@ class AudioPipeline:
     # ── Speaker ID ────────────────────────────────────────────────────────────
 
     def identify_speaker(self, audio_bytes: bytes) -> str:
+        if self._encoder is None:
+            return "User_1"  # pipeline still loading
         import torch.nn.functional as F
         audio    = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         signal   = torch.from_numpy(audio).unsqueeze(0)
@@ -269,12 +282,18 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
         finally:
             busy = False
 
+    _frame_count = 0
     try:
         while True:
             try:
                 chunk = await asyncio.wait_for(websocket.receive_bytes(), timeout=30)
             except asyncio.TimeoutError:
+                print("[Audio WS] idle — no frames for 30s", flush=True)
                 continue  # idle — keep connection alive
+
+            _frame_count += 1
+            if _frame_count == 1 or _frame_count % 500 == 0:
+                print(f"[Audio] frames received: {_frame_count} (latest chunk: {len(chunk)} bytes)", flush=True)
 
             # While a phrase is being processed, drain incoming audio without
             # buffering it.  This prevents stale utterances from queueing up

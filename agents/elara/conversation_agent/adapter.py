@@ -92,7 +92,12 @@ _GRIEF_SENTENCE_RE = re.compile(
     r"(still\s+)?(cherish|treasure)\s+(her|him)\b|"
     r"\bjust\s+as\s+\w+\s+was\b|"                            # "just as Margaret was"
     r"\bshare.{0,20}memories.{0,20}with\s+\w+\b|"           # "share some memories with Margaret"
-    r"\bfond\s+memories.{0,30}(her|him)\b)\b",               # "fond memories of her/him"
+    r"\bfond\s+memories.{0,30}(her|him)\b|"                  # "fond memories of her/him"
+    r"\bsignificant\s+absence\b|"                             # "significant absence in your life"
+    r"\bcope\s+with\s+such\s+a\b|"                           # "cope with such a..."
+    r"\bincredibly\s+difficult.{0,30}(absence|loss|without)\b|"
+    r"\bsorry\s+to\s+hear\s+that\s+you.{0,30}(down|difficult|hard|struggling)\b|"
+    r"\b(absence|void).{0,20}(in\s+your\s+life|you\s+feel)\b)\b",
     re.IGNORECASE,
 )
 
