@@ -200,12 +200,11 @@ DIRECT_CHAT — greetings, small talk, questions TO ELARA, reactions, simple mat
 {{recent_context}}User message: "{{text}}"
 Detected emotion: {{emotion}}
 
-Output exactly ONE line:
-STORE_MEMORY | <why>
-RETRIEVE_MEMORY | <why>
-STORE_AND_RETRIEVE | <why>
-DIRECT_CHAT | <why>
-USE_TOOL | <tool_name> | <why>"""
+Output exactly ONE line — the action, a pipe, then a short plain-English reason. Examples:
+STORE_MEMORY | user stated they live in Kerala
+DIRECT_CHAT | casual greeting, nothing to store
+RETRIEVE_MEMORY | user asking what they previously told me
+USE_TOOL | web_search | user wants current weather info"""
 
 VALID_ACTIONS = {"STORE_MEMORY", "RETRIEVE_MEMORY", "STORE_AND_RETRIEVE", "USE_TOOL", "DIRECT_CHAT"}
 
@@ -275,10 +274,13 @@ def route(text: str, emotion: str = None, recent_turns: list = None) -> RouteDec
 
 # ── STYLE FEEDBACK DETECTION ───────────────────────────────────────────────
 
-_STYLE_PROMPT = """Does this message express frustration, annoyance, or dissatisfaction with how the AI is speaking — such as being too long, too wordy, too formal, too slow, or too much?
-Answer YES or NO only.
+_STYLE_PROMPT = """Does this message contain an EXPLICIT complaint about how the AI assistant is speaking or responding — for example: talking too much, being too long-winded, too formal, repeating itself, or ignoring what the user said?
 
-Message: "{text}" """
+Answer YES only if the user is directly criticizing the AI's communication style.
+Answer NO for everything else: questions, stories, facts, requests, greetings, or any topic that is NOT about how the AI speaks.
+
+Message: "{text}"
+Answer (YES or NO only): """
 
 
 def detect_style_frustration(text: str) -> bool:

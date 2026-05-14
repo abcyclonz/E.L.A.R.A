@@ -20,7 +20,7 @@ import requests
 # ---------------------------------------------------------------------------
 
 OLLAMA_URL      = os.environ.get("OLLAMA_URL", "http://localhost:11434") + "/api/chat"
-OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "qwen2.5:1.5b")
+OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "qwen2.5:72b")
 
 GROQ_MODEL      = "llama-3.1-8b-instant"   # ~200ms first token on free tier
 

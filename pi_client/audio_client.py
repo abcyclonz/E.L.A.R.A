@@ -69,10 +69,14 @@ def _play_wav(wav_bytes: bytes):
         _playing.clear()
 
 
-async def run():
-    print(f"Connecting to {WS_URL} ...")
-
-    async with websockets.connect(WS_URL, max_size=10 * 1024 * 1024) as ws:
+async def _connect_and_stream():
+    """Single connection attempt — raises on disconnect."""
+    async with websockets.connect(
+        WS_URL,
+        max_size=10 * 1024 * 1024,
+        ping_interval=10,   # send pings every 10s to keep RunPod proxy alive
+        ping_timeout=60,    # allow 60s for pong — server may be doing STT/LLM/TTS
+    ) as ws:
         print("Connected. Speak now — Elara is listening.\n")
 
         mic = _open_mic()
@@ -81,9 +85,13 @@ async def run():
         async def sender():
             loop = asyncio.get_event_loop()
             while True:
-                chunk = await loop.run_in_executor(None, _send_queue.get)
                 try:
+                    chunk = await loop.run_in_executor(
+                        None, lambda: _send_queue.get(timeout=1)
+                    )
                     await ws.send(chunk)
+                except queue.Empty:
+                    continue
                 except websockets.ConnectionClosed:
                     break
 
@@ -98,6 +106,32 @@ async def run():
         finally:
             mic.stop_stream()
             mic.close()
+            # drain stale chunks so reconnect starts clean
+            while not _send_queue.empty():
+                try:
+                    _send_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+
+async def run():
+    print(f"Connecting to {WS_URL} …")
+    backoff = 3
+    while True:
+        try:
+            await _connect_and_stream()
+        except (websockets.ConnectionClosed, ConnectionError, OSError) as e:
+            print(f"[Disconnected] {e} — reconnecting in {backoff}s…")
+            _playing.clear()
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
+        except Exception as e:
+            print(f"[Error] {e} — reconnecting in {backoff}s…")
+            _playing.clear()
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 30)
+        else:
+            backoff = 3  # reset backoff on clean disconnect
 
 
 if __name__ == "__main__":

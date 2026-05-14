@@ -293,18 +293,20 @@ def handle_input(req: AgentInput, http_req: Request = None):
     tool_called      = None
     speaker_id       = req.speaker or "user"
 
+    print(f"[User → {speaker_id}] {req.text}")
+
     # Fetch grounding facts once per turn — always present in Elara's context.
     grounding_facts = fetch_grounding(speaker_id)
 
-    # Derive user location: browser GPS (most accurate) → memory → ipinfo fallback
+    # Derive user location: browser GPS (most accurate) → memory → client IP lookup
+    # Never fall back to bare ipinfo.io/json — that returns the server's location, not the user's.
     user_location = (req.metadata or {}).get("location") or _location_from_grounding(grounding_facts)
     x_forwarded = (http_req.headers if http_req else {}).get("X-Forwarded-For")
-    client_ip = x_forwarded.split(',')[0] if x_forwarded else None
-    if not user_location:
+    client_ip = (x_forwarded.split(',')[0].strip() if x_forwarded
+                 else (req.metadata or {}).get("client_ip"))
+    if not user_location and client_ip:
         try:
-        # Use the client_ip if available, otherwise it defaults to the server IP (bad)
-            url = f"https://ipinfo.io/{client_ip}/json" if client_ip else "https://ipinfo.io/json"
-            ul = _requests.get(url, timeout=2).json()
+            ul = _requests.get(f"https://ipinfo.io/{client_ip}/json", timeout=2).json()
             city, region = ul.get('city'), ul.get('region')
             if city and region:
                 user_location = f"{city}, {region}"
@@ -587,6 +589,7 @@ def handle_input(req: AgentInput, http_req: Request = None):
 
     # ── Step 5: Store this turn as an episode (episodic memory) ──────────
     store_episode(speaker_id, req.text, elara_result.get("reply", ""))
+    print(f"[Elara → {speaker_id}] {elara_result.get('reply', '')}")
 
     # ── Step 6: Trigger conversation summarization every N turns ──────────
     last_turns = elara_result.get("last_turns", [])

@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     # Ollama (local LLM)
     ollama_url: str = "http://172.17.0.1:11434"  # host.docker.internal = your machine from inside Docker
-    ollama_model: str = "mistral"
+    ollama_model: str = "qwen2.5:72b"
 
     # Embedding model — separate from the chat model
     embedding_model: str = "nomic-embed-text"

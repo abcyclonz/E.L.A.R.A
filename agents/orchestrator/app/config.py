@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_url: str = "http://172.17.0.1:11434"
-    ollama_model: str = "mistral:latest"
+    ollama_model: str = "qwen2.5:72b"
 
     # Conversation summarization (0 = disabled)
     summarize_every_n_turns: int = 5

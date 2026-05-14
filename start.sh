@@ -73,7 +73,7 @@ if ! curl -sf http://localhost:11434 &>/dev/null; then
 fi
 
 # Pull required models (skips if already present)
-OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:32b}"
+OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:72b}"
 EMBED_MODEL="nomic-embed-text"
 
 log "Checking model: $OLLAMA_MODEL"
@@ -103,6 +103,15 @@ sudo -u postgres psql -lqt | cut -d'|' -f1 | grep -qw memory_db || \
 sudo -u postgres psql -d memory_db -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || true
 sudo -u postgres psql -d memory_db -f "$ROOT/agents/memory/sql/init.sql" >> "$LOGS/db_init.log" 2>&1 || true
 sudo -u postgres psql -d memory_db -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO memory_user; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO memory_user;" 2>/dev/null || true
+# Transfer table ownership so memory_user can run ALTER TABLE migrations at startup
+sudo -u postgres psql -d memory_db -c "
+    ALTER TABLE IF EXISTS state_memory    OWNER TO memory_user;
+    ALTER TABLE IF EXISTS belief_memory   OWNER TO memory_user;
+    ALTER TABLE IF EXISTS event_memory    OWNER TO memory_user;
+    ALTER TABLE IF EXISTS memory_logs     OWNER TO memory_user;
+    ALTER TABLE IF EXISTS topic_frequency OWNER TO memory_user;
+    ALTER TABLE IF EXISTS episodes        OWNER TO memory_user;
+" 2>/dev/null || true
 log "PostgreSQL ready"
 
 # Redis
@@ -205,8 +214,11 @@ OLLAMA_MODEL="$OLLAMA_MODEL" \
 WEB_SEARCH_MCP_URL="http://localhost:8010" \
 ASSISTANT_MCP_URL="http://localhost:8011" \
 REDIS_URL="redis://localhost:6379/0" \
+REDIS_HOST=localhost \
+REDIS_PORT=6379 \
 JWT_SECRET_KEY="${JWT_SECRET_KEY:-elara-dev-secret-change-in-prod}" \
 TAVILY_API_KEY="${TAVILY_API_KEY:-}" \
+WHISPER_MODEL="${WHISPER_MODEL:-large-v3-turbo}" \
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8003 >> "$LOGS/orchestrator.log" 2>&1 &
 BGPIDS+=($!)
 popd > /dev/null

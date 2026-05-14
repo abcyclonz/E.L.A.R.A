@@ -163,16 +163,20 @@ pi_client/audio_client.py (Raspberry Pi)
     ↓ WebSocket binary frames → ws://<pod>-8001.proxy.runpod.net/ws/audio
 agents/orchestrator/app/audio_ws.py (RunPod)
   AudioPipeline.load() [once at startup, background thread]
-    ├── Silero VAD (torch.hub)
-    ├── Faster-Whisper "base.en" (CPU int8)
-    └── SpeechBrain ECAPA-TDNN (cosine, threshold 0.25)
-  handle_audio_ws() per connection:
+    ├── Silero VAD (torch.hub, speech threshold 0.65)
+    ├── Faster-Whisper large-v3-turbo (CUDA float16 on GPU, int8 CPU fallback)
+    │     └── initial_prompt: Indian place/language proper nouns to reduce mishearing
+    └── SpeechBrain ECAPA-TDNN (cosine similarity, threshold 0.15)
+  handle_audio_ws() per connection — non-blocking receive loop:
     ├── VAD accumulates speech frames
     ├── Silence timeout (0.8s) → complete phrase
+    ├── busy=True while pipeline is running; incoming audio drained and dropped
+    │     (prevents stale queued utterances from replaying after a slow LLM turn)
+    ├── asyncio.create_task(_process_phrase) — receive loop never blocks
     ├── Parallel: STT thread + Speaker ID thread
     │     └── auto-register new speaker if audio ≥ 1.5s + no match
     ├── handle_input() → full orchestrator pipeline
-    └── GET elara:8002/tts → Kokoro WAV → send back over WebSocket
+    └── POST elara:8002/tts → Kokoro WAV → send back over WebSocket (timeout 120s)
   Speaker embeddings: /data/speaker_embeddings.json (persists restarts)
 ```
 
@@ -205,9 +209,13 @@ VoiceAssistantCore.process_audio()
 ### Audio Gateway (`agents/orchestrator/app/audio_ws.py`)
 - `AudioPipeline` singleton: loads Silero VAD + Faster-Whisper + SpeechBrain once, reused per connection
 - Loaded in background daemon thread at orchestrator startup (non-blocking — health check passes immediately)
-- `SILENCE_TIMEOUT = 0.8s`, `MIN_AUDIO_LEN = 0.5s`, `SAMPLE_RATE = 16kHz`
+- `SILENCE_TIMEOUT = 0.8s`, `MIN_AUDIO_LEN = 0.5s`, `SAMPLE_RATE = 16kHz`, `VAD_THRESHOLD = 0.65`
+- **STT model**: `large-v3-turbo` via `WHISPER_MODEL` env var (CUDA float16 on GPU, int8 CPU fallback). `condition_on_previous_text=False` + `no_speech_threshold=0.6` eliminate most hallucinations. `initial_prompt` seeds Indian proper nouns (Kerala, Kochi, etc.) to fix chronic mishearing.
+- **Speaker ID threshold**: 0.15 cosine similarity (lowered from 0.25 — stricter caused speaker explosion across reconnections)
+- **Non-blocking receive loop**: `busy` flag set while STT+LLM+TTS is in flight; incoming audio is drained but not buffered. Phrase processing runs as `asyncio.create_task` so the receive loop keeps consuming audio without blocking.
 - Speaker embeddings persisted to `/data/speaker_embeddings.json` — survive pod restarts (not pod deletion)
-- After pipeline runs, calls `elara:8002/tts` for Kokoro synthesis (24kHz WAV, best quality)
+- After pipeline runs, calls `elara:8002/tts` for Kokoro synthesis (24kHz WAV). TTS HTTP timeout is 120s to handle slow Kokoro synthesis.
+- **Location lookup**: uses `websocket.client.host` (passed through `req.metadata["client_ip"]`) — never calls bare `ipinfo.io/json` which returns the server's own IP
 
 ### MIC (`MIC/`) — legacy local processing path
 - Audio: 16kHz, mono, int16 from PyAudio; converted to float32 normalized [-1, 1] before ML
@@ -230,16 +238,18 @@ VoiceAssistantCore.process_audio()
 ### Orchestrator (`agents/orchestrator/`)
 - 5-way LLM router: `STORE_MEMORY | RETRIEVE_MEMORY | STORE_AND_RETRIEVE | USE_TOOL | DIRECT_CHAT`
 - Router fallback (on unparseable LLM output) is `DIRECT_CHAT` — never `STORE_MEMORY`
+- Router output format: `ACTION | short plain-English reason` (e.g. `STORE_MEMORY | user stated they live in Kerala`). The LLM is shown concrete examples, not a placeholder template — avoids Mistral echoing `<why>` literally.
 - Pre-routing short-circuits before the LLM router runs:
   - Single-word affirmations (`ok`, `yes`, `sure`, `alright`, etc.) → always `DIRECT_CHAT`
   - Gratitude words (`thanks`, `thank you`, `cheers`) → bypass LLM entirely, return canned "You're welcome!" reply
+- **StyleCheck**: fires only on explicit complaints about *how the AI speaks* (too long, too formal, repeating itself). Does NOT fire on emphatic speech, stories, or any message not criticising AI communication style.
 - Tool execution uses `extract_tool_params()` (Ollama) to parse structured args from free-form text, then `call_mcp_tool()` to call the right MCP server
 - List vs set intent for reminder/calendar is detected via keyword matching (no extra LLM call)
 - Summarizes conversation every N turns (default 5) and stores as EVENT in memory
 - Per-speaker session state stored in **Redis** (persists across container restarts within a deployment)
 - Auth endpoints: `POST /auth/signup`, `POST /auth/login`, `POST /chat` (token-gated)
 - **Audio WebSocket**: `GET /ws/audio` — Pi thin client connects here; full audio pipeline runs inside the orchestrator process
-- **Location priority** in `handle_input()`: `req.metadata["location"]` (browser GPS) → memory grounding facts → ipinfo.io fallback (2s timeout)
+- **Location priority** in `handle_input()`: `req.metadata["location"]` (browser GPS) → memory grounding facts → `ipinfo.io/<client_ip>/json` (2s timeout, using real Pi/browser IP from metadata — not the server's own IP)
 
 ### Elara (`agents/elara/`)
 - Conversation adapter manages per-turn session state (history, config, bandit tracking)
@@ -248,7 +258,10 @@ VoiceAssistantCore.process_audio()
 - **Affect states**: CALM | FRUSTRATED | CONFUSED | SAD | DISENGAGED (priority order, checked top-down)
 - **Escalation smoother**: 4 rules prevent sudden affect jumps — Rule R4 specifically fires on empty `affect_window` (first turns / post-greeting-reset) to prevent short messages like "Hi" from being classified as `disengaged`
 - **Greeting reset** (`reset_history=True`): clears conversation history AND `bandit.affect_window` / previous bandit state so old emotional context never bleeds into a new session
-- **Post-processing**: leading `Hello [Name]` greetings are stripped from replies after the first turn (Mistral habitually emits them despite prompt instructions)
+- **Post-processing pipeline** (applied in order after LLM output):
+  1. `_trim_to_last_sentence(reply)` — drops any dangling word fragment if the LLM was cut off mid-sentence by the token limit; walks back to the last `.!?` boundary
+  2. `_strip_unsolicited_grief(user_message, reply)` — removes death/grief sentences when user didn't raise the topic
+  3. Leading `Hello [Name]` greeting strip — Mistral habitually emits these after the first turn despite prompt instructions
 - **LinUCB bandit** (7 actions × 7D features): DO_NOTHING, INCREASE_CLARITY, DECREASE_CLARITY, INCREASE_PACE, ENABLE_PATIENCE, DECREASE_CLARITY_AND_PACE, CLARITY_AND_CONFIRMATION
 - Bandit matrices persisted per-user to `elara_bandit_tables` Docker volume
 - **Distress watchdog**: 7 consecutive non-calm turns → `caregiver_alert: true` (SendGrid email via notifier)
@@ -312,7 +325,8 @@ VoiceAssistantCore.process_audio()
 |----------|----------|-------|---------|
 | `SILENCE_TIMEOUT` | `audio_ws.py` / `MIC/main.py` | 0.8s | Silence → end of phrase |
 | `MIN_AUDIO_LEN` | `audio_ws.py` / `MIC/main.py` | 0.5s | Minimum phrase length |
-| `SIMILARITY_THRESHOLD` | `audio_ws.py` / `speaker_manager.py` | 0.25 | Speaker cosine match |
+| `SIMILARITY_THRESHOLD` | `audio_ws.py` | 0.15 | Speaker cosine match (gateway); MIC legacy still 0.25 |
+| `WHISPER_MODEL` | env var / `audio_ws.py` | `large-v3-turbo` | Faster-Whisper model (GPU float16) |
 | `SUMMARIZE_EVERY_N_TURNS` | `orchestrator/config.py` | 5 | Conversation summarization |
 | `DISTRESS_TURN_LIMIT` | `elara/adapter.py` | 7 | Consecutive non-calm before alert |
 | `BANDIT_GAMMA` | `elara/bandit.py` | 0.95 | Discount factor |
@@ -352,6 +366,25 @@ Docker Compose passes `TAVILY_API_KEY` to `web_search_tool` and `orchestrator`. 
 
 ---
 
+## Bugs Fixed (session 2026-05-14)
+
+Issues discovered during first live audio test on RunPod with Raspberry Pi thin client, and how each was resolved:
+
+| Symptom | Root Cause | Fix |
+|---------|------------|-----|
+| No audio processed; random hallucinated replies ("I don't know", "We know that") | Whisper `base.en` on CPU with defaults; `condition_on_previous_text=True` compounded silence into tokens | Upgraded to `large-v3-turbo` (GPU float16); added `condition_on_previous_text=False`, `no_speech_threshold=0.6` |
+| "Kerala" consistently heard as "Gerla"/"Géla" | Whisper has no prior for Indian proper nouns | Added `initial_prompt` with Kerala, Kochi, Thrissur, and other common names |
+| Replies appeared 2 turns late / stale audio replayed out of order | `handle_input()` blocked the receive loop for 15-30s via `run_in_executor` — audio buffered and replayed in sequence | Moved processing to `asyncio.create_task`; `busy=True` drains but discards audio while pipeline is in flight |
+| TTS silent; log showed `"TTS synthesis failed:"` with empty error | `httpx.AsyncClient(timeout=30)` hit `ReadTimeout` on slow Kokoro synthesis | Raised TTS HTTP timeout to 120s; logged exception type for future diagnosis |
+| Router output contained literal `<why>` | Mistral echoed the format placeholder from the prompt template | Replaced placeholder with concrete examples: `STORE_MEMORY \| user stated they live in Kerala` |
+| Location always reported as "Prague" for all users | `ipinfo.io/json` (no IP arg) returns the RunPod server's own location | Changed to `ipinfo.io/<client_ip>/json` using `websocket.client.host` threaded through `req.metadata["client_ip"]` |
+| StyleCheck flagged emphatic speech as frustrated | Broad prompt matched "I really need help!" as an AI communication complaint | Rewrote prompt to require an *explicit* criticism of how the AI speaks; all other messages → NO |
+| `"Task was destroyed but it is pending!"` asyncio warnings | `_publish_transcript` had no timeouts on Redis publish or close — hung on slow/absent Redis | Wrapped with `asyncio.wait_for(..., timeout=3)` on publish and `timeout=1` on close; `socket_connect_timeout=2` on connection |
+| 10 speaker IDs registered within one session | Cosine threshold 0.25 too strict — reconnect variability caused false new-speaker registrations | Lowered threshold to 0.15; reset embeddings file to start fresh |
+| Replies trimmed mid-sentence sent to TTS | Hard `max_tokens` limit in `_PACE_TOKENS` cuts LLM output at token boundary | Added `_trim_to_last_sentence()` post-processing in `adapter.py` — walks back to last `.!?` and drops trailing fragment |
+
+---
+
 ## Known Gaps / Future Work
 
 - **DB table ownership (CRITICAL)**: `init.sql` creates tables owned by `postgres` superuser; memory agent runs as `memory_user`. PostgreSQL ownership (not just privileges) is required for ALTER TABLE — so all startup migrations fail on a fresh pod, leaving `importance`, `speaker_id`, `is_grounding` columns missing and all memory writes silently broken. Fix: add `OWNER memory_user` to every `CREATE TABLE` in `init.sql`, OR add `ALTER TABLE ... OWNER TO memory_user` in `start.sh` after init.sql runs.
@@ -362,7 +395,7 @@ Docker Compose passes `TAVILY_API_KEY` to `web_search_tool` and `orchestrator`. 
 - **Distress escalation**: `send_caregiver_alert()` in `notifier.py` is wired up; requires SendGrid credentials in env
 - **Health monitor tool**: registered in tool registry but not connected to any sensor data source
 - **npm not in PATH**: `start.sh` frontend section silently fails on fresh RunPod pods if Node.js isn't installed. Fix: auto-detect and install Node.js 20 via nodesource, or document the manual step.
-- **Audio WebSocket not yet hardware-tested**: `pi_client/` code is written but end-to-end test with real Pi hardware hasn't been done.
+- **Audio WebSocket hardware-tested**: end-to-end Pi ↔ RunPod audio pipeline verified in production. Known working: VAD, STT (large-v3-turbo), speaker ID, TTS return, `busy` drop-while-processing. Remaining gap: sustained multi-user sessions on real hardware not yet stress-tested.
 - **Orchestrator port mismatch**: Docker exposes 8001, native `start.sh` uses 8003. Pi client `.env.example` documents the Docker (RunPod proxy) port.
 - **Authentication**: `/auth/signup` + `/auth/login` endpoints exist; `speaker_id` on the legacy `/input` endpoint is still client-provided with no validation
 - **Bandit cold start**: first ~20 turns do exploration; no population warm-start

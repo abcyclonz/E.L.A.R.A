@@ -34,17 +34,19 @@ BYTES_PER_SAMPLE = 2        # int16
 ELARA_URL    = os.environ.get("ELARA_URL", "http://elara:8002")
 _REDIS_HOST  = os.environ.get("REDIS_HOST", "redis")
 _REDIS_PORT  = int(os.environ.get("REDIS_PORT", 6379))
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "large-v3-turbo")
 TRANSCRIPT_CHANNEL = "elara:transcript"
 
 
 async def _publish_transcript(who: str, speaker: str, text: str) -> None:
     """Fire-and-forget publish to the live transcript channel."""
     try:
-        rc = aioredis.Redis(host=_REDIS_HOST, port=_REDIS_PORT, db=0)
+        rc = aioredis.Redis(host=_REDIS_HOST, port=_REDIS_PORT, db=0,
+                            socket_connect_timeout=2)
         payload = json.dumps({"who": who, "speaker": speaker, "text": text,
                               "ts": datetime.now(timezone.utc).isoformat()})
-        await rc.publish(TRANSCRIPT_CHANNEL, payload)
-        await rc.aclose()
+        await asyncio.wait_for(rc.publish(TRANSCRIPT_CHANNEL, payload), timeout=3)
+        await asyncio.wait_for(rc.aclose(), timeout=1)
     except Exception as e:
         log.warning("Transcript publish failed: %s", e)
 
@@ -85,11 +87,11 @@ class AudioPipeline:
         log.info("VAD ready.")
 
     def _load_stt(self):
-        log.info("Loading Faster-Whisper (base.en)…")
+        log.info("Loading Faster-Whisper (%s)…", WHISPER_MODEL)
         from faster_whisper import WhisperModel
         device      = "cuda" if torch.cuda.is_available() else "cpu"
         compute     = "float16" if device == "cuda" else "int8"
-        self._stt_model = WhisperModel("base.en", device=device, compute_type=compute)
+        self._stt_model = WhisperModel(WHISPER_MODEL, device=device, compute_type=compute)
         log.info("Whisper ready on %s (%s).", device, compute)
 
     def _load_speaker_encoder(self):
@@ -134,13 +136,29 @@ class AudioPipeline:
         audio   = np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32) / 32768.0
         tensor  = torch.from_numpy(audio)
         prob    = self._vad_model(tensor, SAMPLE_RATE).item()
-        return prob > 0.5
+        return prob > 0.65
 
     # ── STT ───────────────────────────────────────────────────────────────────
 
-    def transcribe(self, audio_bytes: bytes) -> str:
+    # Proper-noun hint fed to Whisper as initial context.
+    # Common Indian place/language names that the model frequently mishears.
+    _INITIAL_PROMPT = (
+        "Kerala, Kochi, Thrissur, Kozhikode, Alappuzha, Kannur, Thiruvananthapuram, "
+        "Calicut, Trivandrum, Malayalam, India, Karnataka, Tamil Nadu, Bangalore, "
+        "Hyderabad, Mumbai, Delhi."
+    )
+
+    def transcribe(self, audio_bytes: bytes, initial_prompt: str = "") -> str:
         audio    = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        segments, _ = self._stt_model.transcribe(audio, beam_size=1, language="en")
+        prompt   = (initial_prompt or self._INITIAL_PROMPT)
+        segments, _ = self._stt_model.transcribe(
+            audio,
+            beam_size=1,
+            language="en",
+            initial_prompt=prompt,
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,
+        )
         return " ".join(s.text for s in segments).strip()
 
     # ── Speaker ID ────────────────────────────────────────────────────────────
@@ -157,7 +175,7 @@ class AudioPipeline:
             if score > best_score:
                 best_score, best_id = score, sid
 
-        if best_score > 0.25 and best_id:
+        if best_score > 0.15 and best_id:
             return best_id
 
         # Auto-register if enough audio (≥ 1.5 s)
@@ -175,7 +193,7 @@ class AudioPipeline:
     # ── Kokoro TTS ────────────────────────────────────────────────────────────
 
     async def synthesize(self, text: str) -> bytes:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             r = await client.post(
                 f"{ELARA_URL}/tts",
                 json={"text": text, "backend": "kokoro", "voice": "bf_emma", "speed": 0.9},
@@ -200,6 +218,11 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
 
     handle_input_fn is the orchestrator's handle_input() — passed in to
     avoid a circular import from audio_ws → main → audio_ws.
+
+    Processing model: phrase detection runs in the main receive loop.
+    STT + LLM + TTS run as a background task so the loop keeps consuming
+    audio. A busy flag prevents queuing stale utterances — any phrase that
+    arrives while we're responding is dropped, not buffered.
     """
     await websocket.accept()
     log.info("Pi audio connection opened from %s", websocket.client)
@@ -207,6 +230,44 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
     audio_buffer: list[bytes] = []
     is_speaking               = False
     silence_start: Optional[float] = None
+    busy                      = False   # True while STT+LLM+TTS is in flight
+
+    async def _process_phrase(full_audio: bytes) -> None:
+        nonlocal busy
+        loop = asyncio.get_event_loop()
+
+        # STT + Speaker ID in parallel
+        text, speaker = await asyncio.gather(
+            loop.run_in_executor(None, pipeline.transcribe, full_audio),
+            loop.run_in_executor(None, pipeline.identify_speaker, full_audio),
+        )
+
+        if not text:
+            busy = False
+            return
+
+        log.info("[%s] %s", speaker, text)
+        asyncio.ensure_future(_publish_transcript("user", speaker, text))
+
+        from app.models import AgentInput
+        client_ip = websocket.client.host if websocket.client else None
+        req    = AgentInput(text=text, speaker=speaker,
+                            metadata={"client_ip": client_ip} if client_ip else {})
+        result = await loop.run_in_executor(None, handle_input_fn, req)
+
+        if not result or not result.reply:
+            busy = False
+            return
+
+        asyncio.ensure_future(_publish_transcript("elara", speaker, result.reply))
+
+        try:
+            wav_bytes = await pipeline.synthesize(result.reply)
+            await websocket.send_bytes(wav_bytes)
+        except Exception as e:
+            log.error("TTS synthesis failed [%s]: %s", type(e).__name__, e)
+        finally:
+            busy = False
 
     try:
         while True:
@@ -214,6 +275,12 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
                 chunk = await asyncio.wait_for(websocket.receive_bytes(), timeout=30)
             except asyncio.TimeoutError:
                 continue  # idle — keep connection alive
+
+            # While a phrase is being processed, drain incoming audio without
+            # buffering it.  This prevents stale utterances from queueing up
+            # behind a slow LLM turn and replaying out of order.
+            if busy:
+                continue
 
             # ── VAD ──────────────────────────────────────────────────────────
             has_speech = await asyncio.get_event_loop().run_in_executor(
@@ -231,7 +298,7 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
                         silence_start = time.monotonic()
                     elif time.monotonic() - silence_start > SILENCE_TIMEOUT:
 
-                        # ── Complete phrase — process it ──────────────────────
+                        # ── Complete phrase — fire and forget ─────────────────
                         full_audio    = b"".join(audio_buffer)
                         audio_buffer  = []
                         is_speaking   = False
@@ -241,36 +308,8 @@ async def handle_audio_ws(websocket: WebSocket, handle_input_fn):
                         if duration < MIN_AUDIO_LEN:
                             continue
 
-                        loop = asyncio.get_event_loop()
-
-                        # STT + Speaker ID in parallel (both are CPU/GPU bound)
-                        text, speaker = await asyncio.gather(
-                            loop.run_in_executor(None, pipeline.transcribe, full_audio),
-                            loop.run_in_executor(None, pipeline.identify_speaker, full_audio),
-                        )
-
-                        if not text:
-                            continue
-
-                        log.info("[%s] %s", speaker, text)
-                        asyncio.ensure_future(_publish_transcript("user", speaker, text))
-
-                        # ── Orchestrator pipeline ─────────────────────────────
-                        from app.models import AgentInput
-                        req    = AgentInput(text=text, speaker=speaker)
-                        result = await loop.run_in_executor(None, handle_input_fn, req)
-
-                        if not result or not result.reply:
-                            continue
-
-                        asyncio.ensure_future(_publish_transcript("elara", speaker, result.reply))
-
-                        # ── TTS → WAV back to Pi ──────────────────────────────
-                        try:
-                            wav_bytes = await pipeline.synthesize(result.reply)
-                            await websocket.send_bytes(wav_bytes)
-                        except Exception as e:
-                            log.error("TTS synthesis failed: %s", e)
+                        busy = True
+                        asyncio.create_task(_process_phrase(full_audio))
 
     except WebSocketDisconnect:
         log.info("Pi audio connection closed.")

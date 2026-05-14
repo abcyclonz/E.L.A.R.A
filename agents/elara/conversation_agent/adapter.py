@@ -85,17 +85,14 @@ _GRIEF_SENTENCE_RE = re.compile(
     r"\b\w+.?s\s+passing\b|"
     r"\blosing\s+someone\b|"
     r"\b(sorry|apologize).{0,25}(loss|passing|gone|grief)\b|"
-    r"\bfeelings?\s+of\s+(loss|grief|sadness|loneliness)\b|"  # "feelings of loss"
+    r"\bfeelings?\s+of\s+(loss|grief)\b|"
     r"\bsense\s+of\s+(loss|grief)\b|"
     r"linger(s|ing)?\s+in\s+your\s+heart|"
     r"(thinking|thought)\s+about\s+(her|him)\s+(a\s+lot|recently|today|lately)|"
-    r"(still\s+)?(remember|cherish|treasure)\s+(her|him)\b|"
+    r"(still\s+)?(cherish|treasure)\s+(her|him)\b|"
     r"\bjust\s+as\s+\w+\s+was\b|"                            # "just as Margaret was"
-    r"\b\w+\s+loved\s+(watching|sharing|doing|making|being|spending)\b|"  # "Margaret loved watching"
-    r"\breminisce\s+about\s+(times\s+with|memories\s+of)\b|" # "reminisce about times with [name]"
-    r"\btimes\s+(with|together\s+with)\s+\w+\b|"             # "times with Margaret"
     r"\bshare.{0,20}memories.{0,20}with\s+\w+\b|"           # "share some memories with Margaret"
-    r"\bfond\s+memories.{0,30}(her|him|\w+)\b)\b",           # "fond memories of Margaret"
+    r"\bfond\s+memories.{0,30}(her|him)\b)\b",               # "fond memories of her/him"
     re.IGNORECASE,
 )
 
@@ -152,6 +149,25 @@ def _strip_unsolicited_grief(user_message: str, reply: str,
             log.info("grief-filter: stripped unsolicited grief reference from reply")
         return result
     return reply
+
+
+def _trim_to_last_sentence(text: str) -> str:
+    """Drop any dangling word fragment after the last complete sentence."""
+    if not text:
+        return text
+    stripped = text.rstrip()
+    # Already ends cleanly — nothing to trim
+    if stripped and stripped[-1] in ".!?":
+        return stripped
+    # Walk backwards to the rightmost terminal punctuation
+    for i in range(len(stripped) - 1, -1, -1):
+        if stripped[i] in ".!?":
+            candidate = stripped[: i + 1]
+            # Keep at least 10 chars so a lone "." on a short reply isn't returned
+            if len(candidate) >= 10:
+                return candidate
+    # No sentence boundary found — return unchanged so short replies aren't emptied
+    return stripped
 
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
@@ -356,6 +372,10 @@ class ConversationAdapter:
         except Exception as exc:
             log.error("LLM call failed: %s", exc)
             reply = "I'm sorry, I'm having a little trouble thinking right now. Please try again."
+
+        # If the reply was cut off mid-sentence by the token limit, trim to the
+        # last complete sentence so the user never hears a dangling fragment.
+        reply = _trim_to_last_sentence(reply)
 
         # Strip grief references when user didn't raise the topic.
         # Pass deceased names extracted from memory context so name-specific
