@@ -51,8 +51,17 @@ def main():
         print("and save it as google_auth/credentials.json")
         return
 
-    flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-    creds = flow.run_local_server(port=0)
+    flow = InstalledAppFlow.from_client_secrets_file(
+        CREDENTIALS_FILE, SCOPES,
+        redirect_uri="urn:ietf:wg:oauth:2.0:oob",
+    )
+    auth_url, _ = flow.authorization_url(prompt="consent")
+    print("\nOpen this URL in your browser:\n")
+    print(auth_url)
+    print()
+    code = input("Paste the authorization code here: ").strip()
+    flow.fetch_token(code=code)
+    creds = flow.credentials
 
     with open(TOKEN_FILE, "w") as f:
         f.write(creds.to_json())

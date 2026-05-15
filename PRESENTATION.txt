@@ -1,0 +1,1438 @@
+
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                                                                                  ║
+║          E . L . A . R . A .                                                     ║
+║          Emotionally Linked Adaptive Responsive Agent                            ║
+║                                                                                  ║
+║          An AI Companion for Elderly Users                                       ║
+║          Built by Abhiram A                                                      ║
+║                                                                                  ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+                        PART ONE: CUSTOMER PRESENTATION
+                   What Elara Does and Why It Matters
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+THE PROBLEM
+───────────────────────────────────────────────────────────────────────────────────
+
+Loneliness among elderly people is one of the fastest-growing health crises in the
+world. Studies consistently rank chronic loneliness as dangerous as smoking 15
+cigarettes a day. For elderly individuals:
+
+  - Adult children are busy with careers and families
+  - Mobility limitations make social visits difficult
+  - Typing or navigating apps is a barrier for people with arthritis or poor eyesight
+  - Smartphones feel foreign and intimidating
+  - Caregivers are expensive and not always available
+
+Existing solutions fall short:
+  - Chatbots forget everything between sessions
+  - Smart speakers (Alexa, Google Home) cannot hold a real conversation
+  - Video calls require the other person to also be available
+  - None of them adapt to how the user is feeling in that moment
+
+Elara was built to solve this. It is a voice-first AI companion that is always
+available, remembers everything, and genuinely adapts to the user.
+
+
+THE SOLUTION IN ONE PARAGRAPH
+───────────────────────────────────────────────────────────────────────────────────
+
+Elara sits on a small Raspberry Pi device in the user's home. The user simply
+speaks — no buttons to press, no screens to touch. Elara listens, understands,
+responds in natural speech, and remembers. It knows who is speaking even without
+being told. It learns over time whether a person prefers short answers or detailed
+ones, and whether they need things repeated more slowly. When Elara detects that
+someone is consistently distressed, it automatically alerts a family member or
+caregiver by email. A family member can also check in through a web dashboard to
+see what their elderly relative has been talking about, in real time.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+                              FEATURES — USER PERSPECTIVE
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+FEATURE 1: VOICE CONVERSATION — COMPLETELY HANDS-FREE
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  The user speaks naturally. Elara listens, understands, and speaks back.
+  No typing. No touchscreen. No buttons.
+
+Real-world scenario:
+  Margaret, 74, retired teacher, sits in her living room after breakfast.
+  She says: "Elara, I heard on the news there was a big flood in Wayanad. What
+  happened exactly?"
+  Elara searches the web and within a few seconds replies in a clear, calm voice
+  with a summary of the latest news.
+
+Why this matters:
+  Margaret has mild arthritis. Typing on a phone is painful. She can't navigate
+  news websites easily. Elara gives her instant access to information with zero
+  physical effort. The device sits on the table and she just talks to it, exactly
+  as she would talk to another person in the room.
+
+How seamless it is:
+  - Elara automatically detects when the user has finished speaking (0.8 seconds
+    of silence) and begins processing. There is no "push to talk" button.
+  - Background noise, fans, or TV audio are filtered out.
+  - If Elara is speaking, the microphone is muted so there is no echo or feedback.
+
+
+FEATURE 2: PERSISTENT MEMORY — IT REMEMBERS EVERYTHING
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Elara builds a permanent, growing memory of the user across every conversation.
+  Facts, preferences, family members, health conditions, life history — all stored
+  and recalled naturally.
+
+Real-world scenario:
+  Day 1 — User says: "My son Arun lives in Bangalore. He's a software engineer."
+  Day 14 — User says: "I spoke to my son yesterday."
+  Elara responds: "That's lovely — how is Arun doing in Bangalore?"
+
+  The user never had to remind Elara who Arun is. It remembered from two weeks ago.
+
+Another scenario:
+  User: "I've been having knee pain lately."
+  (3 weeks later)
+  Elara: "How has your knee been feeling recently? You mentioned some pain a few
+  weeks ago."
+
+Why this matters:
+  Most chatbots and AI assistants forget everything the moment a conversation ends.
+  Elara's memory is permanent. It is the difference between talking to a stranger
+  every day versus a friend who has known you for years.
+
+What it remembers:
+  - Facts: name, age, family members, where they live, health conditions
+  - Opinions and preferences: favourite foods, what they like or dislike
+  - Events: important things that happened — conversations, outings, health episodes
+  - Cross-session context: references something from weeks ago naturally
+
+
+FEATURE 3: ADAPTS HOW IT SPEAKS
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Elara continuously monitors how the user is feeling and adjusts its communication
+  style accordingly — shorter sentences when confused, slower pace when frustrated,
+  more confirmation checks when things seem unclear.
+
+Real-world scenario:
+  Robert, 68, asks Elara to explain how to use an online banking website.
+  After three attempts where Robert says things like "I don't understand" and
+  "you're going too fast," Elara automatically:
+    - Switches to shorter, simpler sentences
+    - Adds confirmation steps ("Does that make sense so far?")
+    - Slows down its response pace
+    - Becomes more patient in its tone
+
+  This happens without Robert asking. Elara detected the confusion from his words
+  and his tone and adjusted on its own.
+
+Why this matters:
+  A one-size-fits-all AI feels robotic and frustrating. Elara learns each user's
+  communication style over time. It is not just a script — it genuinely adapts.
+
+Five emotional states Elara tracks:
+  CALM        — normal conversation, no adjustments needed
+  FRUSTRATED  — something about how Elara is speaking is bothering the user
+  CONFUSED    — user does not understand what was said
+  SAD         — user is expressing sadness or low mood
+  DISENGAGED  — user seems uninterested or giving very short answers
+
+
+FEATURE 4: WEB SEARCH — LOOKS UP ANYTHING IN REAL TIME
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Elara can search the internet and give the user a clear spoken answer. News,
+  weather, local services, sports scores, medical information — anything.
+
+Real-world scenarios:
+  "Elara, what is the weather in Kochi tomorrow?"
+  "Elara, who won the cricket match last night?"
+  "Elara, is there a pharmacy near me?"
+  "Elara, what are the symptoms of low blood pressure?"
+  "Elara, I could really use a good cup of tea — is there a tea shop nearby?"
+
+The last example is notable: Elara detects the implicit intent (finding a tea shop)
+even though the user did not explicitly ask to search. It understands context.
+
+Why this matters:
+  Elderly users often struggle to navigate search engines or evaluate search results.
+  Elara does the searching, filters the results, and delivers a clean spoken answer.
+  The user does not see a list of links — they get a direct, helpful response.
+
+
+FEATURE 5: REMINDERS
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Users can set reminders by speaking. Elara stores them and confirms them.
+
+Real-world scenarios:
+  "Elara, remind me to take my blood pressure medicine tonight at 8."
+  "Elara, don't let me forget that Arun is calling on Sunday."
+  "Elara, what reminders do I have for today?"
+
+Why this matters:
+  Memory lapses are common among elderly users. Medication reminders alone can be
+  life-critical. Setting a reminder requires zero technical skill — just say it
+  the way you would tell another person.
+
+
+FEATURE 6: CALENDAR — GOOGLE CALENDAR INTEGRATION
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Elara can add events to Google Calendar by voice and read back upcoming events.
+  The calendar syncs with the user's actual Google account — family members can
+  see the same events on their own phones.
+
+Real-world scenarios:
+  "Elara, add a doctor appointment on Friday at 10am."
+  "Elara, what do I have on this week?"
+  "Elara, add Arun's birthday on June 15th."
+
+Why this matters:
+  The family can share a single Google Calendar. When Elara adds a doctor
+  appointment, the adult child can see it immediately on their phone and arrange
+  transport. It bridges the gap between the elderly user and the family's digital
+  workflow.
+
+
+FEATURE 7: CAREGIVER ALERTS — SAFETY NET FOR FAMILIES
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  If Elara detects that the user has been persistently distressed over multiple
+  conversation turns — sad, frustrated, confused, or disengaged consistently —
+  it automatically sends an alert email to the designated caregiver or family member.
+
+What the alert says:
+  Subject: [ELARA] Distress Alert — Session User_1
+  Body:
+    ELARA has detected a distress episode.
+    Session ID     : User_1
+    Non-calm turns : 7 consecutive
+    Please check on the user as soon as possible.
+    — ELARA Watchdog
+
+Real-world scenario:
+  Margaret has not been feeling well. Over several conversations she keeps
+  expressing that she feels lonely, is in pain, and is confused. Elara detects 7
+  consecutive turns that are not calm. Without Margaret doing anything, an email
+  arrives in her son Arun's inbox. Arun calls her immediately.
+
+Why this matters:
+  This is a passive safety net. The user does not need to ask for help. They do
+  not need to know the feature exists. It works automatically in the background.
+  For adult children who cannot be physically present, this provides peace of mind.
+
+
+FEATURE 8: KNOWS WHO IS SPEAKING — AUTOMATIC SPEAKER IDENTIFICATION
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Elara recognises individual voices without any login or setup from the user.
+  Each person who speaks to the device gets their own separate memory, personality
+  profile, and conversation history.
+
+Real-world scenario:
+  Margaret and her daughter visit the device on separate days. Elara greets
+  Margaret with memories of their last conversation about her knee. When the
+  daughter speaks later, Elara knows it is a different person — she is greeted
+  separately and their memories do not mix.
+
+Why this matters:
+  No passwords. No choosing profiles. No explaining who you are. Elara figures it
+  out automatically. This is essential for elderly users who may live with a
+  spouse or have family members visit frequently.
+
+
+FEATURE 9: EMOTION AWARENESS — UNDERSTANDS HOW YOU FEEL
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Elara listens for emotional signals in the user's words — not just what they
+  say, but how they say it. It detects frustration, confusion, sadness, and
+  disengagement, and responds with empathy and appropriate adjustments.
+
+Real-world scenario:
+  User: "You already told me that. I don't understand why you keep repeating it."
+  Elara detects frustration and responds with acknowledgement and adjustment rather
+  than simply repeating the information again.
+
+  User: "I just miss my husband so much these days."
+  Elara detects sadness and responds with warmth and empathy, not just information.
+
+Why this matters:
+  Most AI assistants respond to the words, not the emotion. Elara treats
+  emotional context as a first-class signal. This makes the interaction feel
+  like talking to someone who genuinely cares.
+
+
+FEATURE 10: VISION AWARENESS — THE CAMERA EYE
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  A camera on the Raspberry Pi (the physical device) tracks the user's face,
+  identifies them, and passively observes their emotional state and environment.
+  This visual context is merged with the conversation memory.
+
+Real-world scenario:
+  The camera observes Margaret sitting with her grandson who is holding a
+  basketball. The system notes: "Margaret appeared happy while her grandson visited
+  with a basketball." This inference is stored in memory. Later in conversation,
+  when Arun asks Elara how his mother has been, Elara can mention that she seemed
+  happy during the recent family visit.
+
+Why this matters:
+  Conversation alone captures only part of a person's life. The vision channel
+  passively enriches the memory with observations that the user would never think
+  to mention — who visited, what mood they were in, what activities they engaged in.
+
+Additional vision capability:
+  The camera also physically tracks the user's face — pan and tilt servos move the
+  camera to keep the user centred in frame, making it feel like the device is
+  paying attention to them.
+
+
+FEATURE 11: LIVE TRANSCRIPT — FAMILY DASHBOARD
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  A web dashboard available at a permanent URL shows the live conversation
+  transcript in real time — what the user said, what Elara replied, and when.
+
+Real-world scenario:
+  Arun, working in Bangalore, can open the dashboard on his laptop during lunch
+  and see that his mother had a conversation with Elara this morning about her
+  medication and that she mentioned feeling lonely. He did not need to call to find
+  this out.
+
+Why this matters:
+  Gives remote family members a window into their elderly relative's daily life
+  without being intrusive. The user speaks naturally — the family stays informed
+  passively.
+
+Access:
+  Permanent URL: https://06iawuh2w5tl64-3000.proxy.runpod.net
+  Requires login with email and password.
+  OTP pairing code: 123456 (for new devices)
+
+
+FEATURE 12: ALWAYS ON — NO DOWNLOADS, NO SETUP FOR THE USER
+───────────────────────────────────────────────────────────────────────────────────
+
+What it is:
+  Elara runs 24/7 on a cloud server. The user does not manage any software.
+  The physical device (Raspberry Pi) just needs to be plugged in and connected
+  to WiFi.
+
+Why this matters:
+  Elderly users do not update apps or troubleshoot software. Elara's entire
+  intelligence runs in the cloud. The device in the home is just a microphone
+  and speaker — there is nothing for the user to manage.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+                        PART TWO: TECHNICAL DEEP DIVE
+                    Architecture, Technologies, and Decisions
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+SYSTEM ARCHITECTURE OVERVIEW
+───────────────────────────────────────────────────────────────────────────────────
+
+Two parallel channels feed a shared memory store:
+
+VOICE CHANNEL (real-time, interactive):
+  Pi mic → raw PCM → WebSocket → Audio Gateway (VAD + STT + Speaker ID)
+  → Orchestrator (router + tools + memory) → Elara (affect + LLM + TTS)
+  → WAV bytes → Pi speaker
+
+VISION CHANNEL (passive, background):
+  Pi camera → face detection + tracking → identity confirmation
+  → Perception Monitor (emotion + scene analysis)
+  → Perception Learner (cross-modal reasoning)
+  → Memory Agent (stored as EVENT memories)
+  → Read by Orchestrator on every conversation turn
+
+The two channels never block each other. Voice is real-time and synchronous.
+Vision is asynchronous — it enriches memory quietly and the voice channel picks
+up those memories naturally on the next turn.
+
+SERVICE MAP:
+  Memory Agent        :8000   PostgreSQL + pgvector memory store
+  Orchestrator        :8003   LLM router + audio gateway + workflow coordinator
+  Elara               :8002   Conversation + affect-adaptive learning
+  Web Search Tool     :8010   MCP server wrapping Tavily API
+  Assistant Tool      :8011   MCP server for reminders + calendar (SQLite + Google)
+  Perception Learner  :8012   Cross-modal inference: perception × memory → events
+  Redis               :6379   Session state, OTP storage, transcript pub/sub
+  PostgreSQL          :5432   pgvector memory database
+  Frontend            :3000   Next.js web dashboard
+  WS Proxy            :3000   Routes /ws/audio → orchestrator:8003
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 1: THE VOICE PIPELINE
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+1.1 PI THIN CLIENT (pi_client/audio_client.py)
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: PyAudio + websockets (Python)
+
+The Pi captures microphone input using PyAudio's callback mode:
+  - Format: int16 (16-bit signed integer PCM)
+  - Sample rate: 16,000 Hz (16 kHz)
+  - Channels: 1 (mono)
+  - Chunk size: 512 frames (~32ms per chunk)
+
+The callback pushes each chunk into a queue. A sender coroutine drains the queue
+and sends raw binary frames over WebSocket to RunPod.
+
+WHY THIN CLIENT:
+  No ML models on the Pi. The Pi is ~$70 hardware. Loading Whisper or any neural
+  model on it would require a Pi 5 with significant RAM and would be extremely slow.
+  By keeping the Pi dumb (just audio I/O), the heavy ML runs on cloud GPU and the
+  Pi is trivially replaceable.
+
+ECHO PREVENTION (_playing flag):
+  A threading.Event called _playing is set while TTS audio is playing through the
+  speaker. During playback, the mic callback discards audio chunks instead of
+  queueing them. This prevents Elara's own voice from being fed back into the
+  microphone and triggering a second response.
+
+WEBSOCKET KEEPALIVE:
+  RunPod's proxy has an idle timeout. The client sends WebSocket pings every 10
+  seconds with a 60-second pong timeout. This prevents the connection from being
+  killed during long LLM or TTS processing (which can take 15-30 seconds).
+
+RECONNECT WITH BACKOFF:
+  On disconnect, the client retries with exponential backoff starting at 3 seconds,
+  doubling up to a maximum of 30 seconds. This handles RunPod restarts gracefully.
+
+MAX MESSAGE SIZE:
+  10 MB WebSocket message size limit to handle long TTS responses (Kokoro can
+  produce several MB of WAV for a long reply).
+
+
+1.2 VOICE ACTIVITY DETECTION — SILERO VAD
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: Silero VAD via torch.hub
+Library: PyTorch
+Model: snakers4/silero-vad (cached to /root/.cache/torch/hub)
+
+WHY SILERO VAD:
+  It is a tiny, fast neural VAD (Voice Activity Detection) model. It runs in
+  <1ms per chunk on CPU and produces a probability [0,1] of speech presence.
+  Alternatives considered:
+    - WebRTC VAD: rule-based, fragile with accents and background noise
+    - Simple energy threshold: misses soft speech, false-triggers on loud noise
+  Silero gives neural-quality detection at near-zero compute cost.
+
+HOW IT WORKS:
+  Each 512-frame PCM chunk (~32ms audio) is:
+  1. Converted from int16 to float32 in range [-1.0, 1.0] by dividing by 32768
+  2. Converted to a PyTorch tensor
+  3. Passed through the Silero VAD model at 16000 Hz sample rate
+  4. The model returns a probability value
+
+  If prob > 0.65 → speech detected
+  If prob <= 0.65 → silence
+
+THRESHOLD (0.65):
+  The threshold 0.65 was chosen to balance sensitivity. Too low (0.4) and
+  background noise triggers false speech detection. Too high (0.8) and soft
+  speech is missed, especially from elderly speakers who speak quietly.
+
+PHRASE ACCUMULATION LOGIC:
+  - When speech is detected, frames are accumulated into audio_buffer
+  - When silence starts after speech, a silence_start timer begins
+  - If silence lasts > 0.8 seconds (SILENCE_TIMEOUT), the phrase is complete
+  - If the accumulated audio is < 0.5 seconds (MIN_AUDIO_LEN), it is discarded
+    (too short to be a real utterance — catches coughs, door noises, etc.)
+
+SILENCE_TIMEOUT = 0.8s:
+  Chosen to feel natural. 0.5s cut off sentences prematurely (users pause mid-
+  thought). 1.2s made the system feel sluggish after every sentence.
+
+MIN_AUDIO_LEN = 0.5s:
+  Prevents processing single coughs, chair scrapes, or "um" sounds. At 16kHz
+  int16, 0.5 seconds = 16000 bytes minimum payload.
+
+
+1.3 SPEECH-TO-TEXT — FASTER-WHISPER
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: faster-whisper (Python wrapper over CTranslate2 + OpenAI Whisper)
+Model: large-v3-turbo (1.6B parameters, quantised)
+Runtime: CUDA float16 on GPU / int8 on CPU
+
+WHY FASTER-WHISPER LARGE-V3-TURBO:
+  Earlier versions used base.en which was faster but produced:
+    - Constant hallucinations ("I don't know", "We know that")
+    - Silent audio producing random text
+    - Indian proper nouns consistently wrong
+  large-v3-turbo is the best accuracy/speed tradeoff:
+    - GPU: ~1-2 seconds per utterance on a modern GPU
+    - CPU: ~8-15 seconds (acceptable fallback)
+  Alternative considered: Google Cloud Speech-to-Text — adds dependency on
+  third-party API, latency, and cost. Self-hosted is preferable.
+
+KEY PARAMETERS:
+  beam_size=1
+    Greedy decoding (no beam search). Faster and sufficient for conversational speech.
+    beam_size=5 adds ~30% latency for minimal accuracy gain on clear speech.
+
+  language="en"
+    Forced English. Without this, Whisper sometimes interprets Malayalam or
+    Hindi accented English as another language and transcribes in that language.
+
+  condition_on_previous_text=False
+    CRITICAL FIX. When True (the default), Whisper uses its previous output as
+    context for the next segment. In silent audio this caused hallucinations
+    to compound — each silent segment produced increasingly bizarre text by
+    conditioning on the previous hallucinated text. Setting to False treats
+    each utterance independently.
+
+  no_speech_threshold=0.6
+    CRITICAL FIX. Whisper computes an internal "no speech" probability. If
+    this exceeds 0.6, the segment is discarded rather than transcribed.
+    Before this was set, silent periods (when the mic was open but no one
+    was speaking) produced hallucinated transcriptions like "Thank you for
+    watching" — exact patterns from Whisper's YouTube training data.
+
+  initial_prompt
+    A string of proper nouns fed to Whisper as prior context. Whisper has
+    no prior for Indian place names and political terms. Without this:
+      "Kerala"         → "Gerla" / "Gela"
+      "Chief Minister" → "teeth minister"
+      "Thiruvananthapuram" → garbled entirely
+    The prompt includes:
+      Kerala, Kochi, Thrissur, Kozhikode, Alappuzha, Kannur,
+      Thiruvananthapuram, Calicut, Trivandrum, Malayalam, India,
+      Karnataka, Tamil Nadu, Bangalore, Hyderabad, Mumbai, Delhi,
+      Chief Minister, Prime Minister, Member of Parliament,
+      Panchayat, Lok Sabha, Rajya Sabha, rupees, crore, lakh.
+    This dramatically improves accuracy for Indian speakers.
+
+
+1.4 SPEAKER IDENTIFICATION — SPEECHBRAIN ECAPA-TDNN
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: SpeechBrain framework, ECAPA-TDNN architecture
+Model: speechbrain/spkrec-ecapa-voxceleb (trained on VoxCeleb)
+Embedding dimensions: 192
+
+HOW IT WORKS:
+  Audio for each phrase is passed through the ECAPA-TDNN encoder, producing
+  a 192-dimensional embedding that acts as a voice "fingerprint".
+
+  For each known speaker, a stored embedding exists. The cosine similarity
+  between the new embedding and each stored embedding is computed:
+    score = cosine_similarity(new_embedding, stored_embedding)
+    range: [-1.0, 1.0], where 1.0 = identical voices
+
+  If max score > 0.15 → matched to that speaker
+  If max score <= 0.15 → potential new speaker
+
+AUTO-REGISTRATION:
+  If no match is found AND the phrase is >= 1.5 seconds long:
+  - The embedding is stored as a new speaker (User_1, User_2, etc.)
+  - Embeddings are saved to /data/speaker_embeddings.json
+  - They survive pod restarts (but not pod deletion)
+
+WHY THRESHOLD 0.15:
+  Originally 0.25. During the first live test, 10 different speaker IDs were
+  registered in a single session because reconnecting to the WebSocket changes
+  the audio capture context slightly, introducing enough variation to push
+  cosine similarity below 0.25. Lowering to 0.15 fixed this — the same person
+  reconnecting always matches their stored embedding.
+
+WHY 1.5 SECOND MINIMUM FOR REGISTRATION:
+  Short phrases (<1.5s) produce poor-quality embeddings. A cough or a single
+  "hello" would register as a new speaker incorrectly. 1.5 seconds gives the
+  encoder enough audio to produce a stable fingerprint.
+
+PERSISTENCE:
+  Embeddings are serialised as lists in JSON:
+  {
+    "next_id": 3,
+    "speakers": {
+      "User_1": [0.123, -0.456, ...],  // 192 floats
+      "User_2": [0.789, 0.012, ...]
+    }
+  }
+
+CUDA DEVICE STRING:
+  SpeechBrain requires explicit device string "cuda:0" not just "cuda".
+  Passing "cuda" causes a warning and potentially incorrect device selection
+  on multi-GPU machines.
+
+
+1.5 TEXT-TO-SPEECH — KOKORO
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: Kokoro TTS (hexgrad/Kokoro-82M on HuggingFace)
+Output: 24 kHz WAV bytes
+Voice: bf_emma (warm British female voice)
+Speed: 0.9 (slightly slower than default for elderly users)
+
+HOW IT WORKS:
+  Elara sends the reply text to the /tts endpoint on the Elara service.
+  Kokoro synthesises the WAV and returns it as binary HTTP response.
+  The orchestrator sends the WAV bytes over WebSocket back to the Pi.
+  The Pi plays the WAV using PyAudio.
+
+HTTP TIMEOUT (120 seconds):
+  Default was 30 seconds. Kokoro synthesis for a long reply (200+ words)
+  takes 20-60 seconds on CPU, or 5-15 seconds on GPU. The 30-second timeout
+  caused silent failures — the synthesis succeeded but the response was
+  never received. Raising to 120 seconds fixed this.
+
+FIRST-RUN LATENCY:
+  On the very first TTS request after startup, Kokoro downloads and loads
+  its models from HuggingFace. This can take 30-60 seconds. Subsequent
+  requests use cached models and are much faster.
+
+
+1.6 BUSY FLAG PATTERN — PREVENTING STALE AUDIO REPLAY
+───────────────────────────────────────────────────────────────────────────────────
+
+Problem solved:
+  The receive loop (consuming audio from the WebSocket) and the processing
+  pipeline (STT → LLM → TTS) ran concurrently. While a phrase was being
+  processed (which takes 10-30 seconds), the Pi kept sending audio.
+  Those chunks accumulated in the buffer. When processing finished, the
+  buffered audio was processed in order — causing replies that were 2-3
+  conversation turns behind. The user experienced Elara responding to
+  things they said 30 seconds earlier.
+
+Solution:
+  A boolean `busy` flag is set to True when phrase processing begins and
+  cleared in the `finally` block when processing completes.
+  While busy=True, incoming audio chunks are received (to keep the WebSocket
+  healthy) but immediately discarded without buffering.
+  Processing runs as asyncio.create_task so the receive loop never blocks.
+
+Effect:
+  If a user speaks while Elara is thinking, that speech is dropped.
+  The next thing they say after Elara responds is what gets processed.
+  This matches how a natural human conversation works.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 2: MEMORY SYSTEM
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+Technology: PostgreSQL 16 with pgvector extension
+Embedding model: nomic-embed-text (768 dimensions) via Ollama
+Search: cosine similarity on 768D vectors
+
+THREE MEMORY LAYERS:
+
+STATE — Mutable facts with versioning
+  Examples: user's name, age, where they live, health conditions
+  Schema:
+    entity        TEXT    (e.g. "user", "son_arun")
+    attribute     TEXT    (e.g. "name", "location", "health_condition")
+    value         TEXT    (e.g. "Margaret", "Kochi", "mild arthritis")
+    importance    FLOAT   (0.0 to 1.0)
+    stability     TEXT    ("permanent", "stable", "volatile")
+    valid_from    TIMESTAMP
+    valid_to      TIMESTAMP (NULL = currently active)
+    speaker_id    TEXT
+
+  When a fact is updated, the old row gets valid_to=now and a new row is
+  inserted. This preserves the full history of what the system believed.
+
+BELIEF — Subjective opinions, also versioned
+  Examples: user likes gardening, user dislikes loud music
+  Same schema as STATE but represents subjective preferences rather
+  than objective facts. These change more often and are treated differently
+  during retrieval.
+
+EVENT — Immutable experiences with vector embeddings
+  Examples: "User went to the doctor on May 5th and was told blood pressure
+            is under control", "User's son Arun visited on the weekend"
+  Schema:
+    event_type    TEXT
+    description   TEXT
+    embedding     VECTOR(768)   ← nomic-embed-text embedding of the description
+    speaker_id    TEXT
+    created_at    TIMESTAMP
+    metadata      JSONB
+
+  Events are never updated or deleted. They are stored forever and retrieved
+  by semantic similarity. "Remember when we talked about Arun?" triggers a
+  cosine similarity search over all EVENT embeddings to find the most relevant
+  stored experience.
+
+GROUNDING FACTS:
+  Facts with importance >= 0.85 and stability = "permanent" are grounding facts.
+  They are fetched via /grounding/{speaker_id} on every single conversation turn
+  and always included in Elara's context, regardless of what the current
+  conversation is about.
+  Examples of grounding facts: user's name, age, preferred language, background.
+  These ensure Elara never forgets the most fundamental facts about a user.
+
+CLAIM EXTRACTION:
+  When the user says something like "My daughter moved to Dubai last year",
+  the orchestrator calls the memory agent's /process endpoint.
+  The memory agent uses an Ollama LLM to extract structured claims:
+    [
+      {"type": "state", "entity": "daughter", "attribute": "location",
+       "value": "Dubai", "importance": 0.75, "stability": "stable"}
+    ]
+  The LLM is given the existing memory context so it can resolve pronouns
+  and avoid duplicating facts that are already stored.
+
+RETRIEVAL:
+  /retrieve endpoint takes a question, classifies its intent (STATE, BELIEF,
+  or EVENT query), and runs the appropriate query. For EVENT queries it uses
+  pgvector cosine similarity. Results are assembled into a snapshot passed
+  to Elara as context.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 3: THE ORCHESTRATOR — LLM ROUTER
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+The orchestrator is the brain that decides what to do with each user message.
+It implements a 5-way routing system.
+
+5 ROUTE ACTIONS:
+  STORE_MEMORY        → user stated something worth remembering
+  RETRIEVE_MEMORY     → user is asking about something stored
+  STORE_AND_RETRIEVE  → user stated something AND asked a question
+  USE_TOOL            → user wants a web search, reminder, or calendar action
+  DIRECT_CHAT         → respond directly, no memory or tools needed
+
+WHY EXPLICIT ROUTING:
+  A single LLM cannot simultaneously manage memory, tools, emotional support,
+  and factual conversation optimally. By routing explicitly, each path is clean:
+    - Memory paths call the memory agent and get a snapshot
+    - Tool paths call the MCP tool server and get a result
+    - Direct chat goes straight to Elara with no detours
+  This also gives full observability — every routing decision is logged.
+
+LLM ROUTER:
+  Qwen2.5:72b (via Ollama) is called with the user's message and recent
+  conversation history. It returns:
+    ACTION | plain English reason
+    e.g. "STORE_MEMORY | user stated they live in Kerala"
+  On parse failure, the fallback is always DIRECT_CHAT (not STORE_MEMORY —
+  storing garbage would corrupt the memory).
+
+PRE-ROUTING SHORT-CIRCUITS (regex, no LLM call):
+  Many common patterns are detected by regex before the LLM router runs.
+  This saves 500-1000ms and prevents LLM mis-routing on clear cases.
+
+  Greetings ("hello", "hi", "good morning") → DIRECT_CHAT + history reset
+  Single-word affirmations ("ok", "yes", "sure") → DIRECT_CHAT
+  Gratitude ("thanks", "thank you") → canned "You're welcome!" reply (no LLM)
+  Explicit search ("can you search for", "look up") → USE_TOOL | web_search
+  Reminder keywords ("remind me to") → USE_TOOL | reminder
+  List reminders ("what reminders do I have") → USE_TOOL | reminder
+  Memory questions ("do you remember", "what do you know about me") → RETRIEVE_MEMORY
+  Math expressions → DIRECT_CHAT
+  Elara complaints ("you're repeating yourself") → DIRECT_CHAT
+  Implicit search ("I could really use a coffee near me") → USE_TOOL | web_search
+
+STYLE FRUSTRATION DETECTION:
+  A separate LLM call (StyleCheck) fires only when the user seems to be
+  complaining about HOW Elara speaks (too formal, too long, too repetitive).
+  Only runs on messages >= 6 words.
+  When detected, emotion="frustrated" is injected before routing.
+  The prompt was carefully tuned to NOT fire on emphatic speech or stories —
+  only on explicit critiques of AI communication style.
+
+LLM: QWEN2.5:72B VIA OLLAMA:
+  Why Qwen: Strong multilingual capability (important for Indian English),
+  good instruction following, 72B parameter quality at practical speed on
+  RunPod's GPU. The 32B version is used for Elara's conversation replies
+  (slightly faster for the interactive path).
+  Ollama serves models locally — no API keys, no latency to external services,
+  no data leaving the server.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 4: AFFECT DETECTION AND BANDIT LEARNING (ELARA AGENT)
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+4.1 NLP SIGNALS
+───────────────────────────────────────────────────────────────────────────────────
+
+Four signals are computed on every user message (no LLM call — pure Python):
+
+VADER SENTIMENT:
+  VADER (Valence Aware Dictionary and sEntiment Reasoner) is a lexicon-based
+  sentiment analyser tuned for social media and conversational text.
+  Returns a compound score from -1.0 (very negative) to +1.0 (very positive).
+  Why VADER over LLM sentiment: instant (microseconds), deterministic, no latency.
+
+JACCARD REPETITION:
+  Measures word overlap between the current message and recent messages.
+  If the user keeps repeating the same words (e.g. asking the same question
+  multiple times because they did not get a satisfying answer), this score rises.
+  High repetition → confusion or frustration signal.
+
+CONFUSION KEYWORDS:
+  Boolean flag. Fired by patterns: "don't understand", "confused", "what do
+  you mean", "can you explain", "I don't get it", etc.
+
+SADNESS KEYWORDS:
+  Boolean flag. Fired by patterns: "lonely", "sad", "miss", "depressed",
+  "nobody visits", "feeling down", etc.
+
+
+4.2 AFFECT CLASSIFICATION
+───────────────────────────────────────────────────────────────────────────────────
+
+Five states checked in priority order (top-down, first match wins):
+
+  FRUSTRATED  → VADER very negative AND (explicit complaint OR high repetition)
+  CONFUSED    → confusion keyword present
+  SAD         → sadness keyword OR VADER negative on sad-pattern messages
+  DISENGAGED  → very short messages over multiple turns, low engagement
+  CALM        → default when none of the above trigger
+
+ESCALATION SMOOTHER (4 rules):
+  Prevents sudden affect jumps that cause jarring tone changes:
+  Rule R1: Cannot jump from CALM to FRUSTRATED in one turn (need sustained signals)
+  Rule R2: DISENGAGED requires multiple consecutive short messages, not just one
+  Rule R3: Repeated same affect → confidence increases
+  Rule R4: Empty affect_window (first turn or after greeting reset) → never
+           classify as DISENGAGED (short "Hi" messages get misclassified otherwise)
+
+AFFECT WINDOW:
+  The last N affect states are stored. The bandit uses the window distribution
+  as part of its feature vector, not just the current turn's affect.
+
+
+4.3 LINUCB CONTEXTUAL BANDIT
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: LinUCB (Linear Upper Confidence Bound) algorithm
+Actions: 7
+Feature vector: 7 dimensions
+Parameters: alpha=0.8 (exploration), gamma=0.95 (discount factor)
+
+WHY A BANDIT:
+  Supervised learning requires labelled data. "What is the right communication
+  style for this exact user in this exact moment?" has no ground truth labels.
+  The bandit learns from implicit feedback — if a user becomes more calm after
+  Elara increased clarity, that is a positive signal. If they become more
+  frustrated, that is negative. The bandit explores different actions and
+  exploits what works.
+
+7 ACTIONS:
+  0. DO_NOTHING              — keep current style
+  1. INCREASE_CLARITY        — simpler vocabulary, shorter sentences
+  2. DECREASE_CLARITY        — more natural, less simplified (for users who
+                               find over-simplification patronising)
+  3. INCREASE_PACE           — longer replies, more detail
+  4. ENABLE_PATIENCE         — add more confirmation steps, slower pacing
+  5. DECREASE_CLARITY_AND_PACE — shorter AND simpler simultaneously
+  6. CLARITY_AND_CONFIRMATION  — simple language + ask if understood
+
+7D FEATURE VECTOR:
+  [current_affect_one_hot(5D), repetition_score, turn_number_normalised]
+  The one-hot encoding of the 5 affect states occupies 5 dimensions.
+  Repetition score and normalised turn number fill the remaining 2.
+
+MATRICES:
+  Each action a has two matrices: A_a (7×7) and b_a (7×1).
+  The policy is: θ_a = A_a^{-1} b_a
+  UCB score = x^T θ_a + alpha * sqrt(x^T A_a^{-1} x)
+  The second term is the exploration bonus — it is high when the action has
+  been taken less in similar feature states.
+
+REWARD SIGNAL:
+  Positive reward (+1.0): user expressed thanks or positive feedback
+  Positive reward (affect improved): current affect better than previous
+  Negative reward (-0.5): affect worsened this turn
+  Zero reward: affect unchanged
+
+PERSISTENCE:
+  Matrices are serialised and saved per speaker_id to disk (Docker volume).
+  Each user's bandit is independent — the system learns individual preferences.
+
+ALPHA = 0.8:
+  Controls exploration vs exploitation. Higher alpha → more exploration
+  (tries different actions). After many interactions, the bandit naturally
+  exploits more as confidence builds. 0.8 keeps exploration active in the
+  first 20-30 turns while the user's profile is being established.
+
+GAMMA = 0.95:
+  Discount factor for how much past rewards matter. 0.95 means recent rewards
+  are weighted slightly higher than older ones, allowing adaptation if a user's
+  preferences change over time.
+
+
+4.4 POST-PROCESSING PIPELINE
+───────────────────────────────────────────────────────────────────────────────────
+
+Applied in order after every LLM reply:
+
+STEP 1: _trim_to_last_sentence()
+  Problem: The LLM has a max token limit (160/100/60 tokens by pace setting).
+  When a reply is cut off at the token limit, it ends mid-sentence: "The weather
+  in Kochi tomorrow will be warm and hum—"
+  Fix: Walk backwards from the end of the reply to find the last sentence-ending
+  punctuation (. ! ?). Truncate everything after that point.
+  The TTS never speaks an incomplete sentence.
+
+STEP 2: _strip_unsolicited_grief()
+  Problem: The base Elara prompt warns against mentioning death/loss unless the
+  user brings it up. But LLMs (especially Mistral) occasionally generate grief-
+  related sentences even for unrelated topics.
+  Fix: A comprehensive regex pattern matches ~25 grief-related phrases. If the
+  user's message contains no grief trigger words but the reply contains a matched
+  phrase, that sentence is removed from the reply.
+  Examples of matched phrases: "passed away", "significant absence in your life",
+  "cope with such a loss", "incredibly difficult without", "fond memories of her".
+
+STEP 3: Leading greeting strip
+  Problem: Mistral models habitually prepend "Hello [Name]!" at the start of
+  every reply even after the first turn, making conversation feel robotic.
+  Fix: Regex strips "Hello Name," / "Hi Name," patterns from the start of replies
+  after the initial greeting turn.
+
+
+4.5 DISTRESS WATCHDOG
+───────────────────────────────────────────────────────────────────────────────────
+
+DISTRESS_TURN_LIMIT = 7
+  After 7 consecutive turns where affect is not CALM, send_caregiver_alert()
+  is called.
+
+WHY 7:
+  Too few (3-4) causes false alerts — a momentarily confused user or a bad
+  phone call they mentioned would trigger it. 7 consecutive non-calm turns
+  represents sustained distress that warrants human attention.
+
+The counter resets to 0 when a CALM turn is detected.
+The alert is sent only once per distress episode (a flag prevents repeated emails).
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 5: TOOL SYSTEM (MCP)
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+Technology: MCP (Model Context Protocol) over HTTP
+Two tool servers: web_search_tool (:8010), assistant_tool (:8011)
+
+TOOL EXECUTION FLOW:
+  1. Router decides USE_TOOL and identifies which tool (web_search or reminder)
+  2. extract_tool_params() — LLM call to parse structured params from free text
+     "Remind me to call the doctor at 3pm tomorrow" →
+     {"tool": "set_reminder", "text": "call the doctor", "when": "3pm tomorrow"}
+  3. call_mcp_tool() — HTTP POST to the appropriate MCP server
+  4. Tool result injected into Elara's context as if it were memory
+  5. Elara formulates a natural language reply incorporating the result
+
+WEB SEARCH (Tavily API):
+  Tool: search(query, max_results=5)
+  Tavily returns:
+    - A synthesised answer summary (1-2 sentences)
+    - Top 5 result excerpts with titles and snippets
+  Both are concatenated and passed to Elara as context.
+  Requires TAVILY_API_KEY environment variable.
+
+REMINDERS (SQLite):
+  Tools: set_reminder, list_reminders, complete_reminder
+  Storage: SQLite database at /data/assistant.db (Docker volume, persistent)
+  "when" field is parsed by dateparser (supports natural language like
+  "tomorrow at 3pm", "next Friday", "in 2 hours")
+  Speaker-ID scoped — each user's reminders are separate.
+
+CALENDAR (Google Calendar + SQLite fallback):
+  Tools: add_calendar_event, list_calendar_events
+  When token.json is present: uses Google Calendar API
+    - OAuth 2.0 with refresh token (authorised once, valid indefinitely)
+    - Timezone: Asia/Kolkata (IST) by default
+    - Events appear in the user's real Google Calendar immediately
+  When token.json is missing: falls back to SQLite local storage
+  Scopes: https://www.googleapis.com/auth/calendar.events
+
+TOOL DETECTION (keyword short-circuits):
+  Reminder vs list intent is detected by keyword matching, not LLM:
+    "remind me" / "don't let me forget" → set_reminder
+    "what reminders" / "show my reminders" → list_reminders
+  This avoids an extra LLM call for very common, predictable patterns.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 6: CAREGIVER ALERTS
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+Technology: Gmail SMTP with App Password
+Library: smtplib (Python standard library)
+SMTP host: smtp.gmail.com:587 (STARTTLS)
+
+WHY NOT SENDGRID/MAILGUN:
+  No third-party service dependency. No API key from another service.
+  Gmail SMTP with App Password works without any account other than a
+  standard Gmail account. Free. No rate limits for low-volume alerting.
+
+WHY APP PASSWORD (not account password):
+  Google blocks direct SMTP login with the account password if 2-Step
+  Verification is enabled. An App Password is a 16-character code generated
+  specifically for SMTP access — it has limited scope and can be revoked
+  independently of the account password.
+
+CONFIGURATION (environment variables):
+  GMAIL_APP_PASSWORD  — 16-char code from Google Account → Security → App Passwords
+  ALERT_FROM_EMAIL    — Gmail address to send from
+  ALERT_TO_EMAIL      — Destination address (comma-separated for multiple)
+
+GRACEFUL DEGRADATION:
+  If any of the three environment variables is missing, the alert degrades to
+  a log.warning message instead of throwing an exception. The conversation
+  continues unaffected.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 7: VISION PIPELINE
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+7.1 RASPBERRY PI EYE (Face_login_Elara-master/)
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: picamera2, OpenCV Haar cascade, dlib face encoding
+Servo control: ESP32 via USB serial (115200 baud, "P<pan> T<tilt>\n" protocol)
+
+FACE DETECTION (20fps):
+  Haar cascade face detector (OpenCV) runs on every frame.
+  Fast enough for 20fps on a Pi 5. Detects bounding boxes.
+
+PID CONTROLLER:
+  Face centre error → PID controller → pan/tilt delta → ESP32 → servos
+  Deadband: 30px (ignores small offsets to prevent jitter)
+  Pan/tilt limits: 30° to 150°
+  Anti-windup integral clamping prevents overshoot on large face movements
+
+FACE RECOGNITION (every 3 seconds):
+  dlib face_recognition library computes 128D face encoding.
+  Compared against stored encodings in faces/db.json.
+  IDENTITY_TOLERANCE = 0.50 (lower = stricter match requirement)
+  If matched: identity confirmed, `identified_present` flag set
+  If not matched: user shown as "Unknown" — perception monitor skips Unknown frames
+
+FastAPI server on port 8765:
+  GET /frames/event — returns current frame (base64 JPEG), identity, bounding box
+  GET /track/stream — MJPEG stream for live monitoring
+  POST /register — register a new face
+
+PUBLIC ACCESS:
+  Cloudflare Tunnel exposes port 8765 as a public HTTPS URL.
+  Perception monitor on RunPod polls via that URL every 60 seconds.
+
+
+7.2 PERCEPTION MONITOR (monitor.py)
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: HSEmotion (ONNX EfficientNet-B0), Moondream VLM, Mistral LLM
+
+POLL LOOP (every MONITOR_PERIOD_S seconds, default 60):
+  GET /frames/event from Pi tunnel URL
+  Skip if: HTTP error, no frame, identity = "Unknown"
+
+STAGE 1 — EMOTION ANALYSIS (HSEmotion):
+  Face bounding box is cropped from the frame.
+  EfficientNet-B0 (ONNX, runs on CPU) classifies the face crop into 8 emotions:
+    anger, disgust, fear, happiness, sadness, surprise, neutral, contempt
+  Returns the dominant emotion and all 8 probability scores.
+
+STAGE 2 — SCENE DESCRIPTION (Moondream VLM via Ollama):
+  Full frame (not just face) is sent to Moondream with prompt:
+    "Describe what you see in this image concisely."
+  Moondream returns a natural language scene description:
+    "A person is sitting at a table with another person. There is a basketball
+    on the table."
+
+STAGE 3 — STRUCTURED INFERENCE (Mistral LLM via Ollama):
+  Emotion scores + scene description + previous snapshot → structured JSON:
+  {
+    "emotion": "happy",
+    "emotion_affected_by_scene": true,
+    "reason": "The person appears happy likely due to the social interaction",
+    "summary": "User appeared happy during a visit with someone",
+    "subjects": ["person", "basketball"]
+  }
+
+SMART DEDUPLICATION:
+  Before writing to timeline.db, checks if:
+    - Emotion changed from last snapshot
+    - emotion_affected_by_scene flag flipped
+    - Subjects changed significantly (Jaccard similarity < 0.5)
+  Only records if at least one of these is true. Prevents filling the database
+  with "still sitting, still calm" entries every 60 seconds.
+
+
+7.3 PERCEPTION LEARNER (agents/perception_learner/)
+───────────────────────────────────────────────────────────────────────────────────
+
+Technology: FastAPI service (:8012), reads timeline.db, calls memory_agent
+
+POLL LOOP (every POLL_INTERVAL_S seconds, default 600):
+  1. Read new rows from timeline.db since last processed ID
+  2. For each new snapshot:
+     a. Call memory_agent:8000/retrieve with user + scene as query
+     b. If no relevant memory found → SKIP (nothing to cross-reference)
+     c. Send snapshot + memory context to Mistral for cross-modal reasoning:
+        "Given what you know about this person and what the camera observed,
+         what meaningful inference can you draw?"
+     d. LLM returns an inference sentence OR "SKIP"
+     e. If inference: call memory_agent:8000/process → stored as EVENT memory
+  3. Record processed snapshot ID in learner_state.db (own SQLite)
+
+EXAMPLE INFERENCE:
+  Snapshot: "User appeared happy, two people present, basketball visible"
+  Memory context: "User has a son who plays basketball, son visits weekends"
+  Inference: "User was happy during a visit from their son who had a basketball,
+              consistent with their enjoyment of family time on weekends."
+  Stored as EVENT in memory → Elara can reference this naturally in conversation.
+
+STATE TRACKING:
+  learner_state.db records every processed snapshot ID and its inference.
+  Guarantees each snapshot is reasoned over exactly once, survives restarts.
+  No snapshot is ever skipped or double-processed.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 8: INFRASTRUCTURE
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+RUNPOD GPU SERVER:
+  GPU: 97,887 MiB VRAM (sufficient for Whisper large-v3-turbo + SpeechBrain
+       + Qwen2.5:72b simultaneously)
+  Pod ID: 06iawuh2w5tl64 (permanent proxy URLs tied to this ID)
+  All services run natively (no Docker on this pod) via start.sh
+
+RUNPOD PROXY URLS (permanent, no configuration needed):
+  Web dashboard:  https://06iawuh2w5tl64-3000.proxy.runpod.net
+  Audio WS:       wss://06iawuh2w5tl64-3000.proxy.runpod.net/ws/audio
+  These URLs are permanent as long as the pod is not deleted.
+
+REDIS (session state + pub/sub):
+  Per-speaker conversation history, turn counts, last router action
+  OTP storage (keyed as otp:USER_01, 30-day TTL for demo)
+  Device registration (device_reg:USER_01 → user UUID)
+  Live transcript pub/sub channel: elara:transcript
+  SSE (Server-Sent Events) streams transcript events to web dashboard
+
+CLOUDFLARE TUNNEL:
+  trycloudflare.com quick tunnels used for:
+    - Public web access before RunPod proxy URL was configured
+    - Pi Eye server (port 8765) exposed for perception monitor polling
+  Quick tunnels are temporary (change on restart). Named tunnels require
+  a Cloudflare account with a domain for permanence.
+
+OLLAMA (local LLM serving):
+  All LLM inference (routing, claim extraction, conversation, style check,
+  perception reasoning) runs through Ollama on the RunPod server.
+  Models in use:
+    qwen2.5:72b   — main router + conversation (Elara currently uses 32b)
+    nomic-embed-text — memory vector embeddings (768D)
+    moondream     — vision/scene description
+    mistral:latest — perception reasoning + claim extraction
+
+AUTHENTICATION:
+  JWT-based. /auth/signup and /auth/login endpoints on orchestrator.
+  Token stored in localStorage (memora_token).
+  WebSocket audio uses device registration (Pi pairs via OTP flow).
+  Token TTL: 30 days.
+
+NATIVE START (start.sh):
+  On RunPod pods without Docker privileges, start.sh:
+    - Initialises PostgreSQL and Redis
+    - Creates Python venvs for all agents
+    - Starts all services with correct environment variables
+    - Waits for health checks before proceeding to next service
+    - Seeds test users
+  Critical env vars set in start.sh:
+    OLLAMA_URL=http://localhost:11434  (not http://ollama:11434 — Docker hostname)
+    WEB_SEARCH_MCP_URL=http://localhost:8010
+    ASSISTANT_MCP_URL=http://localhost:8011
+    REDIS_HOST=localhost
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 9: BUGS FOUND AND FIXED (Engineering Depth)
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+BUG 1: Whisper Hallucinating on Silence
+  Symptom:  Silent periods produced random text: "I don't know", "We know that",
+            "Thank you for watching" — classic Whisper training data contamination.
+  Root cause: condition_on_previous_text=True (default) caused hallucinations to
+              compound. Each silent chunk built on the previous hallucinated text.
+              no_speech_threshold was not set, so Whisper never discarded silence.
+  Fix:      condition_on_previous_text=False (each utterance independent)
+            no_speech_threshold=0.6 (discard segments Whisper itself is not sure
+            contained speech)
+
+BUG 2: Indian Proper Nouns Consistently Wrong
+  Symptom:  "Kerala" transcribed as "Gerla" or "Gela". "Thrissur" unrecognisable.
+            "Chief Minister" transcribed as "teeth minister".
+  Root cause: Whisper has no statistical prior for Indian place names and political
+              terms. Its training data skews heavily Western.
+  Fix:      initial_prompt seeds the model with a list of Indian proper nouns
+            and political vocabulary before transcription begins. Whisper uses
+            this as context to favour these words when the audio is ambiguous.
+
+BUG 3: Replies Appearing 2-3 Turns Late (Stale Audio Replay)
+  Symptom:  User speaks a sentence, waits, speaks again. Elara responds to the
+            first sentence 30 seconds later, then the second, then the third —
+            all out of sync with the live conversation.
+  Root cause: handle_input() blocked the audio receive loop for 15-30 seconds
+              via run_in_executor. During that time, audio kept accumulating in
+              the buffer. When processing finished, the buffer replayed all
+              accumulated audio sequentially.
+  Fix:      Processing moved to asyncio.create_task (non-blocking). busy=True
+            while processing — incoming audio is received (to keep WebSocket
+            alive) but immediately discarded.
+
+BUG 4: TTS Always Failing Silently
+  Symptom:  Log showed "TTS synthesis failed:" with no error message.
+            Users heard nothing after asking a question.
+  Root cause: httpx.AsyncClient(timeout=30) hit ReadTimeout during slow Kokoro
+              synthesis. Exception type was not logged so diagnosis was hard.
+  Fix:      Raised TTS HTTP timeout to 120 seconds.
+            Added exception type to log: log.error("TTS synthesis failed [%s]:", type(e).__name__)
+
+BUG 5: Router Echoing Literal <why> Tag
+  Symptom:  Router output contained "STORE_MEMORY | <why>" instead of a reason.
+            Downstream parsing failed and fell through to DIRECT_CHAT every time.
+  Root cause: The Mistral prompt used a placeholder template: "ACTION | <why>"
+              Mistral echoed the placeholder rather than substituting it.
+  Fix:      Replaced placeholder with concrete examples in the prompt:
+            "STORE_MEMORY | user stated they live in Kerala"
+            "USE_TOOL | user asked for nearby restaurants"
+
+BUG 6: Location Always Showing as Prague (or Server City)
+  Symptom:  Every user's location was reported as Prague, Czech Republic.
+  Root cause: Location lookup called ipinfo.io/json (no IP argument). This returns
+              the geolocation of the machine making the request — the RunPod server,
+              located in a European data centre.
+  Fix:      Changed to ipinfo.io/<client_ip>/json where client_ip is
+            websocket.client.host (the Pi's actual IP) threaded through
+            req.metadata["client_ip"].
+
+BUG 7: StyleCheck False Positives on Emphatic Speech
+  Symptom:  "I really need help with this!" triggered emotion=frustrated even
+            though the user was not complaining about how Elara spoke.
+  Root cause: Broad StyleCheck prompt matched any emphatic or urgent phrasing.
+  Fix:      Rewrote prompt to require an explicit criticism of AI communication
+            style. "I really need help" → NO. "You keep repeating yourself" → YES.
+            Only fires on messages that directly critique how the AI speaks.
+
+BUG 8: Redis Publish Hanging (asyncio warnings)
+  Symptom:  "Task was destroyed but it is pending!" warnings in logs.
+            Transcript pub/sub occasionally delayed indefinitely.
+  Root cause: _publish_transcript had no timeouts. On a slow or absent Redis,
+              the publish and aclose() calls hung forever, keeping the task alive
+              past its natural completion point.
+  Fix:      asyncio.wait_for(..., timeout=3) on publish
+            asyncio.wait_for(rc.aclose(), timeout=1) on connection close
+            socket_connect_timeout=2 on Redis connection creation
+
+BUG 9: Speaker Identity Explosion (10 IDs in One Session)
+  Symptom:  10 different User_N IDs registered during a single test session.
+            Each reconnection created a new speaker identity.
+  Root cause: Cosine similarity threshold 0.25 was too strict. Reconnecting to
+              the WebSocket slightly changes the audio capture context (buffer
+              state, AGC calibration) introducing enough embedding variation to
+              fall below the threshold.
+  Fix:      Lowered threshold from 0.25 to 0.15. Reset the speaker_embeddings.json
+            to start fresh after the fix.
+
+BUG 10: Replies Trimmed Mid-Sentence Sent to TTS
+  Symptom:  Elara would say "The weather in Kerala tomorrow will be warm and hum—"
+            Kokoro TTS received an incomplete sentence, causing audio artifacts.
+  Root cause: _PACE_TOKENS hard limit cuts LLM output at a token boundary that
+              does not align with sentence endings. Tokens are sub-word units,
+              so the cut can happen inside a word.
+  Fix:      _trim_to_last_sentence() post-processing: walks backwards from the
+            end of the reply to find the last sentence-ending punctuation (. ! ?)
+            and truncates everything after it.
+
+BUG 11: OLLAMA_URL Pointing to Docker Hostname in Native Mode
+  Symptom:  Elara returned "I'm having a little trouble thinking right now" on
+            every message. Orchestrator showed 404 errors connecting to Ollama.
+  Root cause: Docker Compose sets OLLAMA_URL=http://ollama:11434 in the shell
+              environment. Native mode processes inherited this variable. The
+              hostname "ollama" does not resolve outside Docker networking.
+  Fix:      start.sh explicitly sets OLLAMA_URL=http://localhost:11434 for all
+            services. Added REDIS_HOST=localhost for the same reason.
+
+BUG 12: Pipeline Crash on Early Connection (NoneType Errors)
+  Symptom:  "TypeError: 'NoneType' object is not callable" in is_speech()
+            "AttributeError: 'NoneType' object has no attribute 'encode_batch'"
+  Root cause: AudioPipeline.load() runs in a background daemon thread.
+              Pi connected before all three models finished loading.
+              is_speech() called self._vad_model() without checking for None.
+  Fix:      None-guards added:
+              is_speech() returns False if _vad_model is None
+              identify_speaker() returns "User_1" if _encoder is None
+            This allows connections during loading — audio is silently dropped
+            until the pipeline is ready.
+
+BUG 13: SpeechBrain CUDA Device String Warning
+  Symptom:  "Could not parse CUDA device string 'cuda'" in logs.
+  Root cause: SpeechBrain requires "cuda:0" not "cuda" as the device string.
+  Fix:      device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            passed explicitly in run_opts={"device": device}
+
+BUG 14: Pipeline Load Logs Not Appearing in File
+  Symptom:  "VAD ready", "Whisper ready" etc. never appeared in orchestrator.log
+            even though the pipeline was clearly loading (GPU memory increased).
+  Root cause: log.info() messages from the audio_ws logger were filtered by
+              uvicorn's logging configuration. The INFO level from the audio_ws
+              logger namespace was not captured in the file redirect.
+  Fix:      Changed frame-counter, pipeline completion, and idle timeout logs
+            to print() with flush=True. print() writes directly to stdout which
+            is captured by the >> redirect in start.sh.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+TECHNICAL AREA 10: KNOWN GAPS AND ROADMAP
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+CRITICAL GAP — DATABASE TABLE OWNERSHIP:
+  init.sql creates tables owned by the postgres superuser. The memory_agent
+  runs as memory_user. PostgreSQL requires ownership (not just privileges) for
+  ALTER TABLE operations. Startup migrations fail on a fresh pod, leaving columns
+  (importance, speaker_id, is_grounding) missing and all memory writes silently
+  broken.
+  Fix: Add OWNER memory_user to every CREATE TABLE in init.sql, OR add
+       ALTER TABLE ... OWNER TO memory_user in start.sh after init.sql runs.
+
+POSTGRESQL PERSISTENCE:
+  Database lives on pod-local disk. Wiped on pod deletion.
+  Fix: Mount RunPod Network Volume at /var/lib/postgresql/data.
+
+SPEAKER EMBEDDINGS PERSISTENCE:
+  /data/speaker_embeddings.json survives restarts but not pod deletion.
+  Fix: Include in the Network Volume mount.
+
+USER-INITIATED EMAIL:
+  Users cannot ask Elara to send an email on their behalf.
+  Planned: send_email MCP tool + contacts stored in memory agent.
+
+HEALTH MONITOR TOOL:
+  Registered in tool registry but not connected to any sensor data source.
+  Planned: integrate with blood pressure monitor or smartwatch API.
+
+SPEAKER ID PERSISTENCE IN LEGACY MIC PATH:
+  known_speakers in MIC/ module is in-memory. Lost on restart.
+
+PERCEPTION PIPELINE ACTIVATION:
+  Pi Eye server (main.py on port 8765) must be started manually.
+  Perception monitor gets 502 until it is running.
+
+NPM/NODE ON FRESH PODS:
+  start.sh frontend section silently fails if Node.js is not installed.
+  Fix: Auto-detect and install Node.js 20 via nodesource in start.sh.
+
+BANDIT COLD START:
+  First ~20 turns are pure exploration. No population-level warm start.
+  Planned: pre-train on synthetic data or transfer from similar user profiles.
+
+MULTI-USER STRESS TESTING:
+  End-to-end audio pipeline verified with single user. Concurrent multi-user
+  sessions on real hardware not yet stress-tested.
+
+PERCEPTION LEARNER BULK CATCH-UP:
+  If many snapshots accumulate before the learner runs, all are processed
+  in bulk on first poll with no rate limiting or throttling.
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+KEY NUMBERS — QUICK REFERENCE FOR Q&A
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+  SILENCE_TIMEOUT           0.8 seconds      End of spoken phrase
+  MIN_AUDIO_LEN             0.5 seconds      Minimum phrase to process
+  VAD_THRESHOLD             0.65 probability  Speech vs silence decision
+  SPEAKER_COS_THRESHOLD     0.15             Voice match threshold
+  SPEAKER_REG_MIN_DURATION  1.5 seconds      Minimum audio to register new speaker
+  WHISPER_MODEL             large-v3-turbo   1.6B params, CUDA float16
+  EMBEDDING_DIMS_SPEAKER    192              SpeechBrain ECAPA-TDNN output
+  EMBEDDING_DIMS_MEMORY     768              nomic-embed-text for memory search
+  TTS_TIMEOUT               120 seconds      Kokoro HTTP timeout
+  DISTRESS_TURN_LIMIT       7 turns          Consecutive non-calm before alert
+  MAX_HISTORY_TURNS_TO_LLM  10 turns         Of 20 stored, last 10 sent to LLM
+  BANDIT_ACTIONS            7               Communication style options
+  BANDIT_FEATURE_DIMS       7D              Feature vector for bandit
+  BANDIT_ALPHA              0.8             UCB exploration coefficient
+  BANDIT_GAMMA              0.95            Discount factor for past rewards
+  PACE_TOKENS_SLOW          160 tokens      Max reply length at slow pace
+  PACE_TOKENS_NORMAL        100 tokens      Max reply length at normal pace
+  PACE_TOKENS_FAST          60 tokens       Max reply length at fast pace
+  MONITOR_PERIOD            60 seconds      Camera polling interval
+  POLL_INTERVAL             600 seconds     Perception learner check interval
+  SERVO_DEADBAND            30 pixels       Face offset below which servo ignores
+  FACE_IDENTITY_TOLERANCE   0.50            dlib face match threshold
+  IDENTITY_CHECK_INTERVAL   3 seconds       How often dlib re-confirms identity
+  TTS_SAMPLE_RATE           24,000 Hz       Kokoro output quality
+  MIC_SAMPLE_RATE           16,000 Hz       Input capture rate
+  MIC_CHUNK_FRAMES          512             ~32ms per audio chunk
+  WS_PING_INTERVAL          10 seconds      Pi WebSocket keepalive
+  WS_PING_TIMEOUT           60 seconds      Pong wait (survives long LLM turns)
+  WS_MAX_MESSAGE_SIZE       10 MB           Handles long TTS responses
+  REDIS_OTP_TTL             2,592,000s      30 days for demo OTP
+  SUMMARIZE_EVERY_N_TURNS   5 turns         Conversation summarised to memory
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+DEMO CREDENTIALS
+═══════════════════════════════════════════════════════════════════════════════════
+
+
+  URL      :  https://06iawuh2w5tl64-3000.proxy.runpod.net
+  OTP      :  123456  (valid 30 days, refresh with: redis-cli SET otp:USER_01 123456 EX 2592000)
+
+  ACCOUNT 1:  maggie@elara.dev  /  test1234
+              Margaret Thompson, 74, retired teacher, Kochi
+              Interests: gardening, reading, cooking, crossword puzzles
+
+  ACCOUNT 2:  bob@elara.dev  /  test1234
+              Robert Chen, 68, retired engineer, Trivandrum
+              Lives with wife Anita. Enjoys staying mentally sharp.
+
+  NOTE: New visitors see OTP page → Login page → Dashboard.
+        Your own browser goes to Dashboard directly (saved session).
+        Use incognito window to see the full demo flow.
+
+
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                                                                                  ║
+║   E.L.A.R.A.  —  End of Presentation Document                                   ║
+║                                                                                  ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
